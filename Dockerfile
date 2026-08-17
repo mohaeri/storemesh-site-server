@@ -3,4 +3,4 @@ WORKDIR /app
 COPY package.json ./
 COPY src ./src
 EXPOSE 3000
-CMD ["node","src/server.js"]
+CMD ["sh","-c","node src/migrate.js && node src/server.js"]

@@ -4,7 +4,7 @@ const { Pool } = pg;
 export class PostgresRepository {
   constructor({ connectionString = process.env.DATABASE_URL, siteCode = process.env.SITE_CODE || 'IRAN' } = {}) {
     if (!connectionString) throw new Error('DATABASE_URL is required');
-    this.pool = new Pool({ connectionString, max: Number(process.env.DB_POOL_SIZE || 10) }); this.siteCode = siteCode;
+    this.pool = new Pool({ connectionString, max: Number(process.env.DB_POOL_SIZE || 10) }); this.siteCode = siteCode; this.isAsync = true;
   }
   async load() {
     const { rows } = await this.pool.query('SELECT state FROM site_snapshots WHERE site_code = $1', [this.siteCode]);

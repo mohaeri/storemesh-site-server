@@ -5,13 +5,23 @@ export class DomainError extends Error {
 }
 
 export class StoreMesh {
-  constructor({ site = 'IRAN', clock = () => new Date().toISOString(), repository = null } = {}) {
+  constructor({ site = 'IRAN', clock = () => new Date().toISOString(), repository = null, initialState = null } = {}) {
     this.site = site; this.clock = clock;
     this.repository = repository;
-    this.state = repository?.load() || { sessions: [], batches: [], measurements: [], movements: [], packages: [], shipments: [], printJobs: [], audit: [], outbox: [], tasks: [], qualityChecks: [], idempotency: new Map() };
+    this.pendingPersistence = Promise.resolve();
+    this.state = initialState || repository?.load() || { sessions: [], batches: [], measurements: [], movements: [], packages: [], shipments: [], printJobs: [], audit: [], outbox: [], tasks: [], qualityChecks: [], idempotency: new Map() };
+    if (this.state instanceof Promise) throw new Error('Async repositories must be loaded before constructing StoreMesh');
     this.state.tasks ??= []; this.state.qualityChecks ??= [];
   }
-  persist() { this.repository?.save(this.state); }
+  persist() {
+    if (!this.repository) return;
+    if (this.repository.isAsync) {
+      const snapshot = structuredClone({ ...this.state, idempotency: [...this.state.idempotency.entries()] });
+      snapshot.idempotency = new Map(snapshot.idempotency);
+      this.pendingPersistence = this.pendingPersistence.then(() => this.repository.save(snapshot));
+    } else this.repository.save(this.state);
+  }
+  async flush() { await this.pendingPersistence; }
   run(key, action, fn) {
     if (!key) throw new DomainError('IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key is required', 400);
     if (this.state.idempotency.has(key)) return this.state.idempotency.get(key);
@@ -51,15 +61,22 @@ export class StoreMesh {
   }
   transform(input, key) {
     return this.run(key, 'BATCH_TRANSFORMED', () => {
-      this.requireSession(input.sessionId); if (!input.parentIds?.length) throw new DomainError('PARENTS_REQUIRED','At least one parent is required',400);
-      const parents = input.parentIds.map(id => this.batch(id)); const available = parents.reduce((n,b)=>n+b.weightKg,0);
-      if (!(input.outputWeightKg > 0) || input.outputWeightKg > available) throw new DomainError('OUTPUT_WEIGHT_INVALID','Output weight exceeds available input',409);
+      this.requireSession(input.sessionId);
+      const requestedInputs = input.inputs?.length ? input.inputs : (input.parentIds ?? []).map(batchId => ({ batchId, consumeWeightKg:this.batch(batchId).weightKg }));
+      if (!requestedInputs.length) throw new DomainError('PARENTS_REQUIRED','At least one input is required',400);
+      const inputs = requestedInputs.map(x => ({ batch:this.batch(x.batchId), consumeWeightKg:Number(x.consumeWeightKg) }));
+      for (const x of inputs) if (!(x.consumeWeightKg > 0) || x.consumeWeightKg > x.batch.weightKg) throw new DomainError('INSUFFICIENT_INVENTORY','Input exceeds available batch weight',409);
+      const inputWeight = inputs.reduce((n,x)=>n+x.consumeWeightKg,0);
+      if (!(input.outputWeightKg > 0) || input.outputWeightKg > inputWeight) throw new DomainError('OUTPUT_WEIGHT_INVALID','Output weight exceeds consumed input',409);
+      const parents=inputs.map(x=>x.batch);
       const child = { id: randomUUID(), code:`B-${this.site}-${String(this.state.batches.length+1).padStart(6,'0')}`, site:this.site, supplier:null, product:input.product ?? parents[0].product, grade:input.grade ?? parents[0].grade, size:input.size ?? parents[0].size, weightKg:input.outputWeightKg, zone:input.zone ?? 'PROCESSING', status:'PROCESSED', parentIds:input.parentIds, process:input.process, createdAt:this.clock() };
+      child.parentIds=parents.map(x=>x.id); child.inputWeightKg=inputWeight; child.processLossKg=inputWeight-input.outputWeightKg;
+      for(const x of inputs){x.batch.weightKg=Number((x.batch.weightKg-x.consumeWeightKg).toFixed(3));if(x.batch.weightKg===0)x.batch.status='CONSUMED';}
       this.state.batches.push(child); this.measure(child.id,input.outputWeightKg,input.process,input.sessionId); this.queuePrint('BATCH',child.id,child.code); return child;
     });
   }
   createPackage(input, key) {
-    return this.run(key, 'PACKAGE_CREATED', () => { this.requireSession(input.sessionId); const items=input.items?.map(x=>({ batchId:this.batch(x.batchId).id, weightKg:x.weightKg })) ?? []; if(!items.length) throw new DomainError('PACKAGE_EMPTY','Package needs items',400); const p={id:randomUUID(),code:`P-${this.site}-${String(this.state.packages.length+1).padStart(6,'0')}`,type:input.type,items,status:'READY',createdAt:this.clock()}; this.state.packages.push(p); this.queuePrint('PACKAGE',p.id,p.code); return p; });
+    return this.run(key, 'PACKAGE_CREATED', () => { this.requireSession(input.sessionId); const requested=input.items??[];if(!requested.length)throw new DomainError('PACKAGE_EMPTY','Package needs items',400);const items=requested.map(x=>{const batch=this.batch(x.batchId),weightKg=Number(x.weightKg);if(!(weightKg>0)||weightKg>batch.weightKg)throw new DomainError('INSUFFICIENT_INVENTORY','Package item exceeds available batch weight',409);return{batch,weightKg}});for(const x of items){x.batch.weightKg=Number((x.batch.weightKg-x.weightKg).toFixed(3));if(x.batch.weightKg===0)x.batch.status='PACKAGED';}const p={id:randomUUID(),code:`P-${this.site}-${String(this.state.packages.length+1).padStart(6,'0')}`,type:input.type,items:items.map(x=>({batchId:x.batch.id,weightKg:x.weightKg})),status:'READY',createdAt:this.clock()}; this.state.packages.push(p); this.queuePrint('PACKAGE',p.id,p.code); return p; });
   }
   createShipment(input, key) {
     return this.run(key, 'SHIPMENT_CREATED', () => { const ids=input.packageIds ?? []; if(!ids.length) throw new DomainError('SHIPMENT_EMPTY','Shipment needs packages',400); const packages=ids.map(id=>{const p=this.state.packages.find(x=>x.id===id); if(!p) throw new DomainError('PACKAGE_NOT_FOUND','Package not found',404); if(p.shipmentId) throw new DomainError('PACKAGE_ALREADY_SHIPPED','Package already assigned',409); return p;}); const s={id:randomUUID(),code:`S-${this.site}-${String(this.state.shipments.length+1).padStart(6,'0')}`,destinationSite:input.destinationSite,packageIds:ids,status:'READY',createdAt:this.clock()}; this.state.shipments.push(s); packages.forEach(p=>p.shipmentId=s.id); return s; });

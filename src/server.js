@@ -2,6 +2,7 @@ import http from 'node:http';
 import { StoreMesh, DomainError } from './domain.js';
 import { AuthService, authorized } from './auth.js';
 import { JsonRepository } from './persistence.js';
+import { PostgresRepository } from './postgres-repository.js';
 
 export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN', repository: process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null }), auth = null, requireAuth = false } = {}) {
   auth ??= new AuthService({ site: app.site });
@@ -37,9 +38,18 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&u.pathname==='/api/quality-checks'){needs('quality:approve');result=app.qualityCheck(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/complete$/.test(u.pathname)) result=app.completePrint(u.pathname.split('/')[3]);
       else return send(404,{success:false,errorCode:'NOT_FOUND',message:'Route not found'});
-      send(201,{success:true,data:result});
+      await app.flush(); send(201,{success:true,data:result});
     } catch(e){const status=e instanceof DomainError?e.status:500;send(status,{success:false,errorCode:e.code??'SYSTEM',message:e.message});}
   });
 }
 
-if(import.meta.url===`file:///${process.argv[1]?.replaceAll('\\','/')}`){const port=Number(process.env.PORT||3000);createServer({requireAuth:process.env.AUTH_REQUIRED==='true'}).listen(port,()=>console.log(`StoreMesh site server on ${port}`));}
+export async function createRuntimeServer() {
+  const site = process.env.SITE_CODE || 'IRAN'; let repository; let initialState;
+  if (process.env.DATABASE_URL) { repository = new PostgresRepository({ siteCode:site }); initialState = await repository.load(); }
+  else repository = process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null;
+  const app = new StoreMesh({ site, repository: process.env.DATABASE_URL ? null : repository, initialState });
+  if (process.env.DATABASE_URL) app.repository = repository;
+  return createServer({ app, requireAuth:process.env.AUTH_REQUIRED==='true' });
+}
+
+if(import.meta.url===`file:///${process.argv[1]?.replaceAll('\\','/')}`){const port=Number(process.env.PORT||3000);const server=await createRuntimeServer();server.listen(port,()=>console.log(`StoreMesh site server on ${port}`));}
