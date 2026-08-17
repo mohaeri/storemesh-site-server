@@ -40,6 +40,12 @@ export class StoreMesh {
     if (!s) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
     if (s.status !== 'ACTIVE') throw new DomainError('SESSION_NOT_ACTIVE', 'Session is not active', 409); return s;
   }
+  updateSession(id, action) {
+    const s=this.state.sessions.find(x=>x.id===id);if(!s)throw new DomainError('SESSION_NOT_FOUND','Session not found',404);
+    const allowed={ACTIVE:{SUSPEND:'SUSPENDED',COMPLETE:'COMPLETED',CANCEL:'CANCELLED'},SUSPENDED:{RESUME:'ACTIVE',CANCEL:'CANCELLED'}};
+    const next=allowed[s.status]?.[action];if(!next)throw new DomainError('SESSION_TRANSITION_INVALID',`Cannot ${action} a ${s.status} session`,409);
+    s.status=next;s.updatedAt=this.clock();if(['COMPLETED','CANCELLED'].includes(next))s.closedAt=this.clock();this.record(`SESSION_${next}`,s.id);this.persist();return s;
+  }
   receive(input, key) {
     return this.run(key, 'BATCH_RECEIVED', () => {
       this.requireSession(input.sessionId);
@@ -81,8 +87,11 @@ export class StoreMesh {
   createShipment(input, key) {
     return this.run(key, 'SHIPMENT_CREATED', () => { const ids=input.packageIds ?? []; if(!ids.length) throw new DomainError('SHIPMENT_EMPTY','Shipment needs packages',400); const packages=ids.map(id=>{const p=this.state.packages.find(x=>x.id===id); if(!p) throw new DomainError('PACKAGE_NOT_FOUND','Package not found',404); if(p.shipmentId) throw new DomainError('PACKAGE_ALREADY_SHIPPED','Package already assigned',409); return p;}); const s={id:randomUUID(),code:`S-${this.site}-${String(this.state.shipments.length+1).padStart(6,'0')}`,destinationSite:input.destinationSite,packageIds:ids,status:'READY',createdAt:this.clock()}; this.state.shipments.push(s); packages.forEach(p=>p.shipmentId=s.id); return s; });
   }
+  updateShipment(id, action, key){return this.run(key,`SHIPMENT_${action}`,()=>{const s=this.state.shipments.find(x=>x.id===id);if(!s)throw new DomainError('SHIPMENT_NOT_FOUND','Shipment not found',404);const allowed={READY:{LOAD:'LOADED',CANCEL:'CANCELLED'},LOADED:{DISPATCH:'DISPATCHED'},DISPATCHED:{DELIVER:'DELIVERED'}};const next=allowed[s.status]?.[action];if(!next)throw new DomainError('SHIPMENT_TRANSITION_INVALID',`Cannot ${action} a ${s.status} shipment`,409);s.status=next;s.updatedAt=this.clock();return s;});}
   queuePrint(entityType,entityId,label){const j={id:randomUUID(),entityType,entityId,label,status:'PENDING',attempts:0,createdAt:this.clock()};this.state.printJobs.push(j);return j;}
   completePrint(id){const j=this.state.printJobs.find(x=>x.id===id);if(!j)throw new DomainError('PRINT_JOB_NOT_FOUND','Print job not found',404);j.status='PRINTED';j.attempts++;j.printedAt=this.clock();this.record('LABEL_PRINTED',j.entityId,{jobId:id});this.persist();return j;}
+  failPrint(id,reason){const j=this.state.printJobs.find(x=>x.id===id);if(!j)throw new DomainError('PRINT_JOB_NOT_FOUND','Print job not found',404);if(j.status==='PRINTED')throw new DomainError('PRINT_ALREADY_COMPLETED','Printed job cannot fail',409);j.attempts++;j.lastError=reason;j.status=j.attempts>=3?'FAILED':'PENDING';j.updatedAt=this.clock();this.record('LABEL_PRINT_FAILED',j.entityId,{jobId:id,reason,attempts:j.attempts});this.persist();return j;}
+  retryPrint(id){const j=this.state.printJobs.find(x=>x.id===id);if(!j)throw new DomainError('PRINT_JOB_NOT_FOUND','Print job not found',404);if(j.status!=='FAILED')throw new DomainError('PRINT_RETRY_INVALID','Only failed jobs can be retried',409);j.status='PENDING';j.lastError=null;j.updatedAt=this.clock();this.record('LABEL_PRINT_REQUEUED',j.entityId,{jobId:id});this.persist();return j;}
   createTask(input, key){return this.run(key,'TASK_CREATED',()=>{const task={id:randomUUID(),site:this.site,title:input.title,zone:input.zone,priority:input.priority??50,status:'OPEN',assignedTo:input.assignedTo??null,entityId:input.entityId??null,createdAt:this.clock()};this.state.tasks.push(task);return task;});}
   claimTask(id,operatorId,key){return this.run(key,'TASK_CLAIMED',()=>{const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new DomainError('TASK_NOT_FOUND','Task not found',404);if(t.status!=='OPEN')throw new DomainError('TASK_ALREADY_CLAIMED','Task is not open',409);t.status='IN_PROGRESS';t.assignedTo=operatorId;t.claimedAt=this.clock();return t;});}
   qualityCheck(input,key){return this.run(key,'QUALITY_CHECK_RECORDED',()=>{this.batch(input.batchId);if(!['APPROVED','REJECTED','QUARANTINED'].includes(input.result))throw new DomainError('QUALITY_RESULT_INVALID','Invalid quality result',400);const q={id:randomUUID(),batchId:input.batchId,result:input.result,notes:input.notes??'',inspectorId:input.inspectorId,createdAt:this.clock()};this.state.qualityChecks.push(q);if(input.result==='QUARANTINED')this.batch(input.batchId).zone='QUARANTINE';return q;});}
