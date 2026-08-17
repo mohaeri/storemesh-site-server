@@ -3,6 +3,8 @@ ALTER TABLE tasks ALTER COLUMN assigned_to TYPE text USING assigned_to::text;
 ALTER TABLE quality_checks ALTER COLUMN inspector_id TYPE text USING inspector_id::text;
 ALTER TABLE configuration_versions ALTER COLUMN created_by TYPE text USING created_by::text;
 ALTER TABLE configuration_versions ALTER COLUMN updated_by TYPE text USING updated_by::text;
+ALTER TABLE manager_overrides DROP CONSTRAINT IF EXISTS manager_overrides_check;
 ALTER TABLE manager_overrides ALTER COLUMN requested_by TYPE text USING requested_by::text;
 ALTER TABLE manager_overrides ALTER COLUMN resolved_by TYPE text USING resolved_by::text;
+ALTER TABLE manager_overrides ADD CONSTRAINT manager_overrides_no_self_approval CHECK(resolved_by IS NULL OR resolved_by <> requested_by);
 ALTER TABLE internal_transfers ALTER COLUMN received_by TYPE text USING received_by::text;
