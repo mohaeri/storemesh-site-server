@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+const PROCESS_RULES={SORT:{status:'SORTED',zone:'SORTING'},WASH:{status:'WASHED',zone:'WASHING'},SLICE:{status:'SLICED',zone:'SLICING'},FREEZE:{status:'FROZEN',zone:'FREEZING'},FREEZE_DRY:{status:'FREEZE_DRIED',zone:'FREEZE_DRYING'},DRY:{status:'DRIED',zone:'DRYING'},MERGE:{status:'MERGED',zone:'PROCESSING'}};
 
 export class DomainError extends Error {
   constructor(code, message, status = 422) { super(message); this.code = code; this.status = status; }
@@ -72,6 +73,7 @@ export class StoreMesh {
   transform(input, key) {
     return this.run(key, 'BATCH_TRANSFORMED', () => {
       this.requireSession(input.sessionId);
+      const rule=PROCESS_RULES[input.process];if(!rule)throw new DomainError('PROCESS_NOT_SUPPORTED','Unsupported production process',400);
       const requestedInputs = input.inputs?.length ? input.inputs : (input.parentIds ?? []).map(batchId => ({ batchId, consumeWeightKg:this.batch(batchId).weightKg }));
       if (!requestedInputs.length) throw new DomainError('PARENTS_REQUIRED','At least one input is required',400);
       const inputs = requestedInputs.map(x => ({ batch:this.batch(x.batchId), consumeWeightKg:Number(x.consumeWeightKg) }));
@@ -79,12 +81,13 @@ export class StoreMesh {
       const inputWeight = inputs.reduce((n,x)=>n+x.consumeWeightKg,0);
       if (!(input.outputWeightKg > 0) || input.outputWeightKg > inputWeight) throw new DomainError('OUTPUT_WEIGHT_INVALID','Output weight exceeds consumed input',409);
       const parents=inputs.map(x=>x.batch);
-      const child = { id: randomUUID(), code:`B-${this.site}-${String(this.state.batches.length+1).padStart(6,'0')}`, site:this.site, supplier:null, product:input.product ?? parents[0].product, grade:input.grade ?? parents[0].grade, size:input.size ?? parents[0].size, weightKg:input.outputWeightKg, zone:input.zone ?? 'PROCESSING', status:'PROCESSED', parentIds:input.parentIds, process:input.process, createdAt:this.clock() };
+      const child = { id: randomUUID(), code:`B-${this.site}-${String(this.state.batches.length+1).padStart(6,'0')}`, site:this.site, supplier:null, product:input.product ?? parents[0].product, grade:input.grade ?? parents[0].grade, size:input.size ?? parents[0].size, weightKg:input.outputWeightKg, zone:input.zone ?? rule.zone, status:rule.status, parentIds:input.parentIds, process:input.process, createdAt:this.clock() };
       child.parentIds=parents.map(x=>x.id); child.inputWeightKg=inputWeight; child.processLossKg=inputWeight-input.outputWeightKg;
       for(const x of inputs){x.batch.weightKg=Number((x.batch.weightKg-x.consumeWeightKg).toFixed(3));if(x.batch.weightKg===0)x.batch.status='CONSUMED';}
       this.state.batches.push(child); this.measure(child.id,input.outputWeightKg,input.process,input.sessionId); this.queuePrint('BATCH',child.id,child.code); return child;
     });
   }
+  sortBatch(input,key){return this.run(key,'BATCH_SORTED',()=>{this.requireSession(input.sessionId);const parent=this.batch(input.batchId),outputs=input.outputs??[];if(!outputs.length)throw new DomainError('SORT_OUTPUTS_REQUIRED','Sorting requires outputs',400);const total=outputs.reduce((n,x)=>n+Number(x.weightKg),0);if(!(total>0)||total>parent.weightKg)throw new DomainError('SORT_WEIGHT_INVALID','Sorted output exceeds available weight',409);const children=outputs.map(x=>{if(!(x.weightKg>0)||!x.grade||!x.size)throw new DomainError('SORT_OUTPUT_INVALID','Every output needs positive weight, grade and size',400);const child={id:randomUUID(),code:`B-${this.site}-${String(this.state.batches.length+1).padStart(6,'0')}`,site:this.site,supplier:null,product:parent.product,grade:x.grade,size:x.size,weightKg:Number(x.weightKg),zone:x.zone??'SORTING',status:'SORTED',parentIds:[parent.id],process:'SORT',createdAt:this.clock()};this.state.batches.push(child);this.measure(child.id,child.weightKg,'SORT',input.sessionId);this.queuePrint('BATCH',child.id,child.code);return child});parent.weightKg=Number((parent.weightKg-total).toFixed(3));if(parent.weightKg===0)parent.status='CONSUMED';return{children,remainingWeightKg:parent.weightKg,lossKg:Number(input.lossKg??0)};});}
   createPackage(input, key) {
     return this.run(key, 'PACKAGE_CREATED', () => { this.requireSession(input.sessionId); const requested=input.items??[];if(!requested.length)throw new DomainError('PACKAGE_EMPTY','Package needs items',400);const items=requested.map(x=>{const batch=this.batch(x.batchId),weightKg=Number(x.weightKg);if(!(weightKg>0)||weightKg>batch.weightKg)throw new DomainError('INSUFFICIENT_INVENTORY','Package item exceeds available batch weight',409);return{batch,weightKg}});for(const x of items){x.batch.weightKg=Number((x.batch.weightKg-x.weightKg).toFixed(3));if(x.batch.weightKg===0)x.batch.status='PACKAGED';}const p={id:randomUUID(),code:`P-${this.site}-${String(this.state.packages.length+1).padStart(6,'0')}`,type:input.type,items:items.map(x=>({batchId:x.batch.id,weightKg:x.weightKg})),status:'READY',createdAt:this.clock()}; this.state.packages.push(p); this.queuePrint('PACKAGE',p.id,p.code); return p; });
   }

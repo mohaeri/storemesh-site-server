@@ -39,6 +39,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/assign$/.test(u.pathname)){needs('operations:write');const b=await body();result=app.assignBatchToContainer(u.pathname.split('/')[3],b.batchId,b.sessionId,key);}
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/move$/.test(u.pathname)){needs('operations:write');const b=await body();result=app.moveContainer(u.pathname.split('/')[3],b.zone,b.sessionId,key);}
       else if(req.method==='POST'&&u.pathname==='/api/transforms') result=app.transform(await body(),key);
+      else if(req.method==='POST'&&u.pathname==='/api/sorting'){needs('operations:write');result=app.sortBatch(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/packages') result=app.createPackage(await body(),key);
       else if(req.method==='POST'&&u.pathname==='/api/shipments') result=app.createShipment(await body(),key);
       else if(req.method==='POST'&&/^\/api\/shipments\/[^/]+\/(load|dispatch|deliver|cancel)$/.test(u.pathname)){needs('operations:write');const parts=u.pathname.split('/');result=app.updateShipment(parts[3],parts[4].toUpperCase(),key);}
