@@ -11,7 +11,9 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
     auth.addUser({ id:'admin-1', username:process.env.BOOTSTRAP_ADMIN_USER||'admin', password:process.env.BOOTSTRAP_ADMIN_PASSWORD||'storemesh-demo', roles:['ADMIN'] });
     auth.addUser({ id:'operator-1', username:'operator', password:'operator-demo', roles:['OPERATOR'] });
   }
-  return http.createServer(async (req,res)=>{
+  const stats={requests:0,errors:0,startedAt:Date.now()};
+  const server=http.createServer(async (req,res)=>{
+    stats.requests++;
     res.setHeader('Access-Control-Allow-Origin','*'); res.setHeader('Access-Control-Allow-Headers','Content-Type,Idempotency-Key,Authorization'); res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');
     if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
@@ -19,6 +21,8 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
     try {
       const u=new URL(req.url,'http://localhost'); const key=req.headers['idempotency-key']; let result;
       if(req.method==='GET'&&u.pathname==='/health') return send(200,{status:'ok',site:app.site});
+      if(req.method==='GET'&&u.pathname==='/ready'){try{if(app.repository?.ready)await app.repository.ready();return send(200,{status:'ready',site:app.site})}catch{return send(503,{status:'not_ready',site:app.site})}}
+      if(req.method==='GET'&&u.pathname==='/metrics'){res.writeHead(200,{'Content-Type':'text/plain; version=0.0.4'});return res.end([`storemesh_http_requests_total ${stats.requests}`,`storemesh_http_errors_total ${stats.errors}`,`storemesh_uptime_seconds ${Math.floor((Date.now()-stats.startedAt)/1000)}`,`storemesh_batches ${app.state.batches.length}`,`storemesh_outbox_pending ${app.state.outbox.filter(x=>x.status==='PENDING').length}`,`storemesh_print_jobs_pending ${app.state.printJobs.filter(x=>x.status==='PENDING').length}`].join('\n')+'\n')}
       if(req.method==='POST'&&u.pathname==='/api/auth/login'){const b=await body();const token=auth.login(b.username,b.password);return token?send(200,{success:true,data:{token}}):send(401,{success:false,errorCode:'INVALID_CREDENTIALS',message:'Invalid credentials'});}
       const user=auth.verify(req.headers.authorization?.replace(/^Bearer /,''));
       if(requireAuth&&!user)return send(401,{success:false,errorCode:'AUTHENTICATION_REQUIRED',message:'Authentication required'});
@@ -57,8 +61,9 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/retry$/.test(u.pathname)) result=app.retryPrint(u.pathname.split('/')[3]);
       else return send(404,{success:false,errorCode:'NOT_FOUND',message:'Route not found'});
       await app.flush(); send(201,{success:true,data:result});
-    } catch(e){const status=e instanceof DomainError?e.status:500;send(status,{success:false,errorCode:e.code??'SYSTEM',message:e.message});}
+    } catch(e){stats.errors++;const status=e instanceof DomainError?e.status:500;if(status>=500)console.error(JSON.stringify({level:'error',site:app.site,errorCode:e.code??'SYSTEM',message:e.message,at:new Date().toISOString()}));send(status,{success:false,errorCode:e.code??'SYSTEM',message:e.message});}
   });
+  server.stats=stats;return server;
 }
 
 export async function createRuntimeServer() {
