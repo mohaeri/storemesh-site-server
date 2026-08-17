@@ -1,25 +1,40 @@
 import http from 'node:http';
 import { StoreMesh, DomainError } from './domain.js';
+import { AuthService, authorized } from './auth.js';
+import { JsonRepository } from './persistence.js';
 
-export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN' }) } = {}) {
+export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN', repository: process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null }), auth = null, requireAuth = false } = {}) {
+  auth ??= new AuthService({ site: app.site });
+  if (!auth.users.size) {
+    auth.addUser({ id:'admin-1', username:process.env.BOOTSTRAP_ADMIN_USER||'admin', password:process.env.BOOTSTRAP_ADMIN_PASSWORD||'storemesh-demo', roles:['ADMIN'] });
+    auth.addUser({ id:'operator-1', username:'operator', password:'operator-demo', roles:['OPERATOR'] });
+  }
   return http.createServer(async (req,res)=>{
-    res.setHeader('Access-Control-Allow-Origin','*'); res.setHeader('Access-Control-Allow-Headers','Content-Type,Idempotency-Key'); res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Origin','*'); res.setHeader('Access-Control-Allow-Headers','Content-Type,Idempotency-Key,Authorization'); res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');
     if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
     const body=async()=>{let raw='';for await(const c of req)raw+=c;return raw?JSON.parse(raw):{};};
     try {
       const u=new URL(req.url,'http://localhost'); const key=req.headers['idempotency-key']; let result;
       if(req.method==='GET'&&u.pathname==='/health') return send(200,{status:'ok',site:app.site});
+      if(req.method==='POST'&&u.pathname==='/api/auth/login'){const b=await body();const token=auth.login(b.username,b.password);return token?send(200,{success:true,data:{token}}):send(401,{success:false,errorCode:'INVALID_CREDENTIALS',message:'Invalid credentials'});}
+      const user=auth.verify(req.headers.authorization?.replace(/^Bearer /,''));
+      if(requireAuth&&!user)return send(401,{success:false,errorCode:'AUTHENTICATION_REQUIRED',message:'Authentication required'});
+      const needs=permission=>{if(requireAuth&&!authorized(user,permission))throw new DomainError('FORBIDDEN','Insufficient permission',403);};
+      if(req.method==='GET'&&u.pathname==='/api/tasks'){needs('inventory:read');return send(200,{items:app.state.tasks});}
       if(req.method==='GET'&&u.pathname==='/api/inventory') return send(200,{items:app.inventory()});
       if(req.method==='GET'&&u.pathname==='/api/print-jobs') return send(200,{items:app.state.printJobs});
       if(req.method==='GET'&&u.pathname==='/api/outbox') return send(200,{items:app.state.outbox});
       if(req.method==='GET'&&u.pathname.startsWith('/api/trace/')) return send(200,app.trace(u.pathname.split('/').at(-1)));
-      if(req.method==='POST'&&u.pathname==='/api/sessions') result=app.openSession((await body()).operatorId);
-      else if(req.method==='POST'&&u.pathname==='/api/receiving') result=app.receive(await body(),key);
+      if(req.method==='POST'&&u.pathname==='/api/sessions'){needs('operations:write');result=app.openSession((await body()).operatorId);}
+      else if(req.method==='POST'&&u.pathname==='/api/receiving'){needs('operations:write');result=app.receive(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/movements'){const b=await body();result=app.move(b.batchId,b.zone,b.sessionId,key);}
       else if(req.method==='POST'&&u.pathname==='/api/transforms') result=app.transform(await body(),key);
       else if(req.method==='POST'&&u.pathname==='/api/packages') result=app.createPackage(await body(),key);
       else if(req.method==='POST'&&u.pathname==='/api/shipments') result=app.createShipment(await body(),key);
+      else if(req.method==='POST'&&u.pathname==='/api/tasks'){needs('operations:write');result=app.createTask(await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/claim$/.test(u.pathname)){needs('operations:write');const b=await body();result=app.claimTask(u.pathname.split('/')[3],b.operatorId,key);}
+      else if(req.method==='POST'&&u.pathname==='/api/quality-checks'){needs('quality:approve');result=app.qualityCheck(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/complete$/.test(u.pathname)) result=app.completePrint(u.pathname.split('/')[3]);
       else return send(404,{success:false,errorCode:'NOT_FOUND',message:'Route not found'});
       send(201,{success:true,data:result});
@@ -27,4 +42,4 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
   });
 }
 
-if(import.meta.url===`file:///${process.argv[1]?.replaceAll('\\','/')}`){const port=Number(process.env.PORT||3000);createServer().listen(port,()=>console.log(`StoreMesh site server on ${port}`));}
+if(import.meta.url===`file:///${process.argv[1]?.replaceAll('\\','/')}`){const port=Number(process.env.PORT||3000);createServer({requireAuth:process.env.AUTH_REQUIRED==='true'}).listen(port,()=>console.log(`StoreMesh site server on ${port}`));}
