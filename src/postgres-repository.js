@@ -1,20 +1,30 @@
-import pg from 'pg';
-const { Pool } = pg;
+import pg from 'pg';import { createHash } from 'node:crypto';
+const{Pool}=pg;
+const siteId=code=>{const hex=createHash('sha256').update(`storemesh:${code}`).digest('hex').slice(0,32);return`${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20)}`};
+const json=value=>JSON.stringify(value??{});
 
-export class PostgresRepository {
-  constructor({ connectionString = process.env.DATABASE_URL, siteCode = process.env.SITE_CODE || 'IRAN' } = {}) {
-    if (!connectionString) throw new Error('DATABASE_URL is required');
-    this.pool = new Pool({ connectionString, max: Number(process.env.DB_POOL_SIZE || 10) }); this.siteCode = siteCode; this.isAsync = true;
-  }
-  async load() {
-    const { rows } = await this.pool.query('SELECT state FROM site_snapshots WHERE site_code = $1', [this.siteCode]);
-    if (!rows[0]) return null; const state = rows[0].state; state.idempotency = new Map(state.idempotency || []); return state;
-  }
-  async save(state) {
-    const serializable = { ...state, idempotency: [...state.idempotency.entries()] };
-    await this.pool.query(`INSERT INTO site_snapshots(site_code,state,version) VALUES($1,$2,1)
-      ON CONFLICT(site_code) DO UPDATE SET state=EXCLUDED.state,version=site_snapshots.version+1,updated_at=now()`, [this.siteCode, serializable]);
-  }
-  async ready() { await this.pool.query('SELECT 1'); return true; }
-  async close() { await this.pool.end(); }
+export class PostgresRepository{
+  constructor({connectionString=process.env.DATABASE_URL,siteCode=process.env.SITE_CODE||'IRAN'}={}){if(!connectionString)throw new Error('DATABASE_URL is required');this.pool=new Pool({connectionString,max:Number(process.env.DB_POOL_SIZE||10)});this.siteCode=siteCode;this.siteId=siteId(siteCode);this.isAsync=true}
+  async load(){const{rows}=await this.pool.query('SELECT state FROM site_snapshots WHERE site_code=$1',[this.siteCode]);if(!rows[0])return null;const state=rows[0].state;state.idempotency=new Map(state.idempotency||[]);return state}
+  async save(state){const client=this.pool.connect?await this.pool.connect():this.pool,serializable={...state,idempotency:[...state.idempotency.entries()]};try{await client.query('BEGIN');await client.query(`INSERT INTO sites(id,code,name,timezone,status) VALUES($1,$2,$2,'UTC','ACTIVE') ON CONFLICT(code) DO UPDATE SET status='ACTIVE'`,[this.siteId,this.siteCode]);await client.query(`INSERT INTO site_snapshots(site_code,state,version) VALUES($1,$2,1) ON CONFLICT(site_code) DO UPDATE SET state=EXCLUDED.state,version=site_snapshots.version+1,updated_at=now()`,[this.siteCode,serializable]);
+      for(const x of state.sessions??[])await client.query(`INSERT INTO operational_sessions(id,site_id,operator_id,station,status,draft,started_at,updated_at,closed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,draft=EXCLUDED.draft,updated_at=EXCLUDED.updated_at,closed_at=EXCLUDED.closed_at`,[x.id,this.siteId,x.operatorId,x.station,x.status,json(x.draft),x.startedAt,x.updatedAt,x.closedAt??null]);
+      for(const x of state.containers??[])await client.query(`INSERT INTO containers(id,site_id,code,type,capacity_kg,zone,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO UPDATE SET zone=EXCLUDED.zone,status=EXCLUDED.status`,[x.id,this.siteId,x.code,x.type,x.capacityKg,x.zone,x.status,x.createdAt]);
+      for(const x of state.shipments??[])await client.query(`INSERT INTO shipments(id,site_id,code,destination_site,status,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status`,[x.id,this.siteId,x.code,x.destinationSite,x.status,x.createdAt]);
+      for(const x of state.batches??[])await client.query(`INSERT INTO batches(id,site_id,code,product,grade,size,supplier,harvest_period,weight_kg,zone,status,process,container_id,source_transfer,external_parents,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(id) DO UPDATE SET weight_kg=EXCLUDED.weight_kg,zone=EXCLUDED.zone,status=EXCLUDED.status,container_id=EXCLUDED.container_id`,[x.id,this.siteId,x.code,x.product,x.grade,x.size,x.supplier??null,x.harvestPeriod??null,x.weightKg,x.zone,x.status,x.process??null,x.containerId??null,x.sourceTransfer??null,json(x.externalParents??[]),x.createdAt]);
+      for(const child of state.batches??[])for(const parentId of child.parentIds??[])await client.query(`INSERT INTO batch_genealogy(parent_batch_id,child_batch_id,input_weight_kg) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[parentId,child.id,child.inputWeightKg??null]);
+      for(const x of state.measurements??[])await client.query(`INSERT INTO measurements(id,batch_id,session_id,weight_kg,reason,measured_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING`,[x.id,x.batchId,x.sessionId??null,x.weightKg,x.reason,x.measuredAt]);
+      for(const x of state.movements??[])await client.query(`INSERT INTO inventory_movements(id,batch_id,from_zone,to_zone,moved_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING`,[x.id,x.batchId,x.from,x.to,x.movedAt]);
+      for(const x of state.packages??[])await client.query(`INSERT INTO packages(id,site_id,code,type,status,shipment_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,shipment_id=EXCLUDED.shipment_id`,[x.id,this.siteId,x.code,x.type,x.status,x.shipmentId??null,x.createdAt]);
+      for(const p of state.packages??[])for(const x of p.items??[])await client.query(`INSERT INTO package_items(package_id,batch_id,weight_kg) VALUES($1,$2,$3) ON CONFLICT(package_id,batch_id) DO UPDATE SET weight_kg=EXCLUDED.weight_kg`,[p.id,x.batchId,x.weightKg]);
+      for(const x of state.tasks??[])await client.query(`INSERT INTO tasks(id,site_id,title,zone,priority,status,assigned_to,entity_id,created_at,claimed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,assigned_to=EXCLUDED.assigned_to,claimed_at=EXCLUDED.claimed_at`,[x.id,this.siteId,x.title,x.zone,x.priority,x.status,x.assignedTo??null,x.entityId??null,x.createdAt,x.claimedAt??null]);
+      for(const x of state.qualityChecks??[])await client.query(`INSERT INTO quality_checks(id,batch_id,result,notes,inspector_id,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING`,[x.id,x.batchId,x.result,x.notes,x.inspectorId??null,x.createdAt]);
+      for(const x of state.printJobs??[])await client.query(`INSERT INTO print_jobs(id,site_id,entity_type,entity_id,label,status,attempts,created_at,printed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,attempts=EXCLUDED.attempts,printed_at=EXCLUDED.printed_at`,[x.id,this.siteId,x.entityType,x.entityId,x.label,x.status,x.attempts,x.createdAt,x.printedAt??null]);
+      for(const x of state.audit??[]){await client.query(`INSERT INTO audit_events(id,site_id,event_type,entity_id,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING`,[x.id,this.siteId,x.type,x.entityId??null,json(x.payload),x.occurredAt]);const out=(state.outbox??[]).find(o=>o.id===x.id);if(out)await client.query(`INSERT INTO outbox_events(id,site_id,payload,status,attempts,occurred_at,delivered_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,attempts=EXCLUDED.attempts,delivered_at=EXCLUDED.delivered_at`,[x.id,this.siteId,json(x),out.status,out.attempts??0,x.occurredAt,out.deliveredAt??null])}
+      for(const x of state.configurationVersions??[])await client.query(`INSERT INTO configuration_versions(id,site_id,scope,sequence,status,values,created_by,updated_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,updated_by=EXCLUDED.updated_by,updated_at=EXCLUDED.updated_at`,[x.id,this.siteId,x.scope,x.sequence,x.status,json(x.values),x.createdBy??null,x.updatedBy??null,x.createdAt,x.updatedAt??null]);
+      for(const x of state.overrides??[])await client.query(`INSERT INTO manager_overrides(id,site_id,rule_code,entity_id,reason,requested_by,status,resolved_by,resolution_note,created_at,resolved_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,resolved_by=EXCLUDED.resolved_by,resolution_note=EXCLUDED.resolution_note,resolved_at=EXCLUDED.resolved_at`,[x.id,this.siteId,x.ruleCode,x.entityId??null,x.reason,x.requestedBy,x.status,x.resolvedBy??null,x.resolutionNote??null,x.createdAt,x.resolvedAt??null]);
+      for(const x of state.internalTransfers??[])await client.query(`INSERT INTO internal_transfers(id,site_id,source_site,shipment_code,received_by,manifest,received_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING`,[x.id,this.siteId,x.sourceSite,x.shipmentCode,x.receivedBy??null,json(x.manifest??{}),x.receivedAt]);
+      for(const[key,response]of state.idempotency.entries())await client.query(`INSERT INTO idempotency_records(site_id,idempotency_key,action,response) VALUES($1,$2,'DOMAIN',$3) ON CONFLICT(site_id,idempotency_key) DO UPDATE SET response=EXCLUDED.response`,[this.siteId,key,json(response)]);
+      await client.query('COMMIT');
+    }catch(error){await client.query('ROLLBACK');throw error}finally{client.release?.()}}
+  async ready(){await this.pool.query('SELECT 1');return true}async close(){await this.pool.end()}
 }
