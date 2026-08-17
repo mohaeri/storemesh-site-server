@@ -3,6 +3,7 @@ import { StoreMesh, DomainError } from './domain.js';
 import { AuthService, authorized } from './auth.js';
 import { JsonRepository } from './persistence.js';
 import { PostgresRepository } from './postgres-repository.js';
+import { OutboxPublisher } from './outbox-publisher.js';
 
 export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN', repository: process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null }), auth = null, requireAuth = false } = {}) {
   auth ??= new AuthService({ site: app.site });
@@ -53,7 +54,8 @@ export async function createRuntimeServer() {
   else repository = process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null;
   const app = new StoreMesh({ site, repository: process.env.DATABASE_URL ? null : repository, initialState });
   if (process.env.DATABASE_URL) app.repository = repository;
-  return createServer({ app, requireAuth:process.env.AUTH_REQUIRED==='true' });
+  const server=createServer({ app, requireAuth:process.env.AUTH_REQUIRED==='true' });
+  const publisher=new OutboxPublisher({app,cloudUrl:process.env.CLOUD_URL,siteKey:process.env.SITE_SYNC_KEY});publisher.start();server.on('close',()=>publisher.stop());server.storemesh={app,publisher};return server;
 }
 
 if(import.meta.url===`file:///${process.argv[1]?.replaceAll('\\','/')}`){const port=Number(process.env.PORT||3000);const server=await createRuntimeServer();server.listen(port,()=>console.log(`StoreMesh site server on ${port}`));}
