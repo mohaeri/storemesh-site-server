@@ -8,8 +8,10 @@ import { OutboxPublisher } from './outbox-publisher.js';
 export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN', repository: process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null }), auth = null, requireAuth = false } = {}) {
   auth ??= new AuthService({ site: app.site });
   if (!auth.users.size) {
+    const demoAllowed=process.env.NODE_ENV!=='production'&&process.env.ALLOW_DEMO_CREDENTIALS!=='false';
+    if(!demoAllowed&&(!process.env.BOOTSTRAP_ADMIN_USER||!process.env.BOOTSTRAP_ADMIN_PASSWORD))throw new Error('Production bootstrap credentials are required');
     auth.addUser({ id:'admin-1', username:process.env.BOOTSTRAP_ADMIN_USER||'admin', password:process.env.BOOTSTRAP_ADMIN_PASSWORD||'storemesh-demo', roles:['ADMIN'] });
-    auth.addUser({ id:'operator-1', username:'operator', password:'operator-demo', roles:['OPERATOR'] });
+    if(demoAllowed)auth.addUser({ id:'operator-1', username:'operator', password:'operator-demo', roles:['OPERATOR'] });
   }
   const stats={requests:0,errors:0,startedAt:Date.now()};
   const server=http.createServer(async (req,res)=>{
@@ -31,29 +33,31 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&u.pathname==='/api/containers'){needs('inventory:read');return send(200,{items:app.state.containers});}
       if(req.method==='GET'&&u.pathname==='/api/configurations'){needs('inventory:read');return send(200,{items:app.state.configurationVersions});}
       if(req.method==='GET'&&u.pathname==='/api/overrides'){needs('inventory:read');return send(200,{items:app.state.overrides});}
-      if(req.method==='GET'&&u.pathname==='/api/inventory') return send(200,{items:app.inventory()});
-      if(req.method==='GET'&&u.pathname==='/api/print-jobs') return send(200,{items:app.state.printJobs});
-      if(req.method==='GET'&&u.pathname==='/api/outbox') return send(200,{items:app.state.outbox});
+      if(req.method==='GET'&&u.pathname==='/api/inventory'){needs('inventory:read');return send(200,{items:app.inventory()});}
+      if(req.method==='GET'&&u.pathname==='/api/print-jobs'){needs('inventory:read');return send(200,{items:app.state.printJobs});}
+      if(req.method==='GET'&&u.pathname==='/api/outbox'){needs('audit:read');return send(200,{items:app.state.outbox});}
       if(req.method==='GET'&&u.pathname==='/api/sessions'){needs('inventory:read');return send(200,{items:app.state.sessions});}
       if(req.method==='GET'&&u.pathname==='/api/packages'){needs('inventory:read');return send(200,{items:app.state.packages});}
       if(req.method==='GET'&&u.pathname==='/api/shipments'){needs('inventory:read');return send(200,{items:app.state.shipments});}
       if(req.method==='GET'&&u.pathname==='/api/quality-checks'){needs('inventory:read');return send(200,{items:app.state.qualityChecks});}
       if(req.method==='GET'&&u.pathname==='/api/inventory-adjustments'){needs('inventory:read');return send(200,{items:app.state.inventoryAdjustments});}
-      if(req.method==='GET'&&u.pathname==='/api/audit'){needs('inventory:read');return send(200,{items:app.state.audit});}
+      if(req.method==='GET'&&u.pathname==='/api/audit'){needs('audit:read');return send(200,{items:app.state.audit});}
       if(req.method==='GET'&&u.pathname==='/api/internal-transfers'){needs('inventory:read');return send(200,{items:app.state.internalTransfers});}
       if(req.method==='GET'&&/^\/api\/shipments\/[^/]+\/manifest$/.test(u.pathname))return send(200,app.shipmentManifest(u.pathname.split('/')[3]));
       if(req.method==='GET'&&u.pathname.startsWith('/api/trace/')) return send(200,app.trace(u.pathname.split('/').at(-1)));
       if(req.method==='POST'&&u.pathname==='/api/sessions'){needs('operations:write');result=app.openSession((await body()).operatorId);}
+      else if(req.method==='POST'&&/^\/api\/sessions\/[^/]+\/draft$/.test(u.pathname)){needs('operations:write');result=app.saveSessionDraft(u.pathname.split('/')[3],(await body()).draft);}
       else if(req.method==='POST'&&/^\/api\/sessions\/[^/]+\/(suspend|resume|complete|cancel)$/.test(u.pathname)){needs('operations:write');const parts=u.pathname.split('/');result=app.updateSession(parts[3],parts[4].toUpperCase());}
       else if(req.method==='POST'&&u.pathname==='/api/receiving'){needs('operations:write');result=app.receive(await body(),key);}
-      else if(req.method==='POST'&&u.pathname==='/api/movements'){const b=await body();result=app.move(b.batchId,b.zone,b.sessionId,key);}
+      else if(req.method==='POST'&&u.pathname==='/api/movements'){needs('operations:write');const b=await body();result=app.move(b.batchId,b.zone,b.sessionId,key);}
       else if(req.method==='POST'&&u.pathname==='/api/containers'){needs('operations:write');result=app.createContainer(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/assign$/.test(u.pathname)){needs('operations:write');const b=await body();result=app.assignBatchToContainer(u.pathname.split('/')[3],b.batchId,b.sessionId,key);}
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/move$/.test(u.pathname)){needs('operations:write');const b=await body();result=app.moveContainer(u.pathname.split('/')[3],b.zone,b.sessionId,key);}
-      else if(req.method==='POST'&&u.pathname==='/api/transforms') result=app.transform(await body(),key);
+      else if(req.method==='POST'&&u.pathname==='/api/transforms'){needs('operations:write');result=app.transform(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/sorting'){needs('operations:write');result=app.sortBatch(await body(),key);}
-      else if(req.method==='POST'&&u.pathname==='/api/packages') result=app.createPackage(await body(),key);
-      else if(req.method==='POST'&&u.pathname==='/api/shipments') result=app.createShipment(await body(),key);
+      else if(req.method==='POST'&&u.pathname==='/api/packages'){needs('operations:write');result=app.createPackage(await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/packages\/[^/]+\/(pack|seal|print|print_success|print_fail|retry|ready|ship)$/.test(u.pathname)){needs('operations:write');const parts=u.pathname.split('/');result=app.transitionPackage(parts[3],parts[4].toUpperCase(),key);}
+      else if(req.method==='POST'&&u.pathname==='/api/shipments'){needs('shipment:write');result=app.createShipment(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/internal-transfers/receive'){needs('operations:write');result=app.receiveInternalTransfer(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/shipments\/[^/]+\/(load|dispatch|deliver|cancel)$/.test(u.pathname)){needs('operations:write');const parts=u.pathname.split('/');result=app.updateShipment(parts[3],parts[4].toUpperCase(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/tasks'){needs('operations:write');result=app.createTask(await body(),key);}
@@ -65,9 +69,9 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/configurations\/[^/]+\/(approve|activate)$/.test(u.pathname)){needs('config:write');const parts=u.pathname.split('/'),b=await body();result=app.transitionConfiguration(parts[3],parts[4].toUpperCase(),b.userId,key);}
       else if(req.method==='POST'&&u.pathname==='/api/overrides'){needs('operations:write');result=app.requestOverride(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/overrides\/[^/]+\/resolve$/.test(u.pathname)){needs('quality:approve');result=app.resolveOverride(u.pathname.split('/')[3],await body(),key);}
-      else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/complete$/.test(u.pathname)) result=app.completePrint(u.pathname.split('/')[3]);
-      else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/fail$/.test(u.pathname)){const b=await body();result=app.failPrint(u.pathname.split('/')[3],b.reason);}
-      else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/retry$/.test(u.pathname)) result=app.retryPrint(u.pathname.split('/')[3]);
+      else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/complete$/.test(u.pathname)){needs('print:write');result=app.completePrint(u.pathname.split('/')[3]);}
+      else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/fail$/.test(u.pathname)){needs('print:write');const b=await body();result=app.failPrint(u.pathname.split('/')[3],b.reason);}
+      else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/retry$/.test(u.pathname)){needs('print:write');const b=await body();result=app.retryPrint(u.pathname.split('/')[3],b.verifiedScan);}
       else return send(404,{success:false,errorCode:'NOT_FOUND',message:'Route not found'});
       await app.flush(); send(201,{success:true,data:result});
     } catch(e){stats.errors++;const status=e instanceof DomainError?e.status:500;if(status>=500)console.error(JSON.stringify({level:'error',site:app.site,errorCode:e.code??'SYSTEM',message:e.message,at:new Date().toISOString()}));send(status,{success:false,errorCode:e.code??'SYSTEM',message:e.message});}

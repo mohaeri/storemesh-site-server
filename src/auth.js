@@ -2,9 +2,12 @@ import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 
 const b64 = value => Buffer.from(JSON.stringify(value)).toString('base64url');
 const parse = value => JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+const header = b64({ alg:'HS256', typ:'JWT' });
 
 export class AuthService {
-  constructor({ secret = process.env.AUTH_SECRET || 'development-only-change-me', site = 'IRAN', clock = () => Date.now() } = {}) {
+  constructor({ secret = process.env.AUTH_SECRET, site = 'IRAN', clock = () => Date.now() } = {}) {
+    if (!secret && (process.env.NODE_ENV === 'production' || process.env.AUTH_REQUIRED === 'true')) throw new Error('AUTH_SECRET is required when authentication is enabled');
+    secret ??= randomBytes(32).toString('hex');
     this.secret = secret; this.site = site; this.clock = clock; this.users = new Map();
   }
   addUser({ id, username, password, roles = ['OPERATOR'], site = this.site }) {
@@ -16,19 +19,19 @@ export class AuthService {
     if (!user || user.status !== 'ACTIVE') return null;
     const supplied = scryptSync(password, user.salt, 64); const expected = Buffer.from(user.passwordHash, 'hex');
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return null;
-    const payload = { sub: user.id, username, site: user.site, roles: user.roles, exp: this.clock() + 8 * 60 * 60 * 1000 };
-    const encoded = b64(payload); return `${encoded}.${createHmac('sha256', this.secret).update(encoded).digest('base64url')}`;
+    const payload = { sub: user.id, username, site: user.site, roles: user.roles, iat:Math.floor(this.clock()/1000), exp:Math.floor(this.clock()/1000) + 8 * 60 * 60 };
+    const encoded = b64(payload), unsigned=`${header}.${encoded}`; return `${unsigned}.${createHmac('sha256', this.secret).update(unsigned).digest('base64url')}`;
   }
   verify(token) {
-    if (!token?.includes('.')) return null; const [encoded, signature] = token.split('.');
-    const expected = createHmac('sha256', this.secret).update(encoded).digest('base64url');
+    if (!token || token.split('.').length!==3) return null; const [encodedHeader,encoded,signature] = token.split('.');
+    const parsedHeader=parse(encodedHeader);if(parsedHeader.alg!=='HS256'||parsedHeader.typ!=='JWT')return null;const expected = createHmac('sha256', this.secret).update(`${encodedHeader}.${encoded}`).digest('base64url');
     if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
-    const payload = parse(encoded); return payload.exp > this.clock() ? payload : null;
+    const payload = parse(encoded); return payload.exp > Math.floor(this.clock()/1000) ? payload : null;
   }
 }
 
 export const permissions = {
-  ADMIN: ['*'], MANAGER: ['inventory:read','operations:write','quality:approve','config:write'],
-  OPERATOR: ['inventory:read','operations:write'], QUALITY: ['inventory:read','quality:approve'], VIEWER: ['inventory:read']
+  ADMIN: ['*'], MANAGER: ['inventory:read','operations:write','shipment:write','print:write','quality:approve','config:write','audit:read'],
+  OPERATOR: ['inventory:read','operations:write','print:write'], QUALITY: ['inventory:read','quality:approve','audit:read'], VIEWER: ['inventory:read']
 };
 export function authorized(user, permission) { return user?.roles?.some(role => permissions[role]?.includes('*') || permissions[role]?.includes(permission)); }
