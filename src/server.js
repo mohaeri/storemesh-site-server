@@ -50,7 +50,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/sessions\/[^/]+\/draft$/.test(u.pathname)){needs('operations:write');result=app.saveSessionDraft(u.pathname.split('/')[3],(await body()).draft);}
       else if(req.method==='POST'&&/^\/api\/sessions\/[^/]+\/(suspend|resume|complete|cancel)$/.test(u.pathname)){needs('operations:write');const parts=u.pathname.split('/');result=app.updateSession(parts[3],parts[4].toUpperCase());}
       else if(req.method==='POST'&&u.pathname==='/api/receiving'){needs('operations:write');result=app.receive(await body(),key);}
-      else if(req.method==='POST'&&u.pathname==='/api/movements'){needs('operations:write');const b=await body();result=app.move(b.batchId,b.zone,b.sessionId,key);}
+      else if(req.method==='POST'&&u.pathname==='/api/movements'){needs('operations:write');const b=await body();result=app.move(b.batchId,b.zone,b.sessionId,key,b.overrideId);}
       else if(req.method==='POST'&&u.pathname==='/api/containers'){needs('operations:write');result=app.createContainer(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/assign$/.test(u.pathname)){needs('operations:write');const b=await body();result=app.assignBatchToContainer(u.pathname.split('/')[3],b.batchId,b.sessionId,key);}
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/move$/.test(u.pathname)){needs('operations:write');const b=await body();result=app.moveContainer(u.pathname.split('/')[3],b.zone,b.sessionId,key);}
