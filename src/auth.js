@@ -11,6 +11,10 @@ export function authRequiredFromEnvironment(env = process.env) {
   return configured!=='false';
 }
 
+export class SiteTokenError extends Error {
+  constructor(tokenSite,expectedSite){super(`Token issued for ${tokenSite} cannot access ${expectedSite}`);this.code='BR-SITE-001';this.status=403;this.category='SITE'}
+}
+
 export class AuthService {
   constructor({ secret = process.env.AUTH_SECRET, site = 'IRAN', clock = () => Date.now() } = {}) {
     if (!secret && (process.env.NODE_ENV === 'production' || process.env.AUTH_REQUIRED === 'true')) throw new Error('AUTH_SECRET is required when authentication is enabled');
@@ -33,7 +37,7 @@ export class AuthService {
     if (!token || token.split('.').length!==3) return null; const [encodedHeader,encoded,signature] = token.split('.');
     const parsedHeader=parse(encodedHeader);if(parsedHeader.alg!=='HS256'||parsedHeader.typ!=='JWT')return null;const expected = createHmac('sha256', this.secret).update(`${encodedHeader}.${encoded}`).digest('base64url');
     if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
-    const payload = parse(encoded); return payload.exp > Math.floor(this.clock()/1000) ? payload : null;
+    const payload = parse(encoded);if(payload.exp<=Math.floor(this.clock()/1000))return null;if(payload.site!==this.site)throw new SiteTokenError(payload.site,this.site);return payload;
   }
 }
 
