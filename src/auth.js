@@ -31,7 +31,7 @@ export class AuthService {
 }
 
 export const permissions = {
-  ADMIN: ['*'], MANAGER: ['inventory:read','operations:write','shipment:write','print:write','quality:approve','config:write','audit:read'],
-  OPERATOR: ['inventory:read','operations:write','print:write'], QUALITY: ['inventory:read','quality:approve','audit:read'], VIEWER: ['inventory:read']
+  ADMIN: ['*'], MANAGER: ['inventory:read','operations:write','shipment:write','print:write','quality:approve','inventory:adjust.approve','config:write','config:approve','override:approve','audit:read'],
+  OPERATOR: ['inventory:read','operations:write','inventory:adjust.request','print:write'], QUALITY: ['inventory:read','quality:approve','inventory:adjust.approve','audit:read'], VIEWER: ['inventory:read']
 };
 export function authorized(user, permission) { return user?.roles?.some(role => permissions[role]?.includes('*') || permissions[role]?.includes(permission)); }
