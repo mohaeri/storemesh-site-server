@@ -4,6 +4,7 @@ import { AuthService, authorized } from './auth.js';
 import { JsonRepository } from './persistence.js';
 import { PostgresRepository } from './postgres-repository.js';
 import { OutboxPublisher } from './outbox-publisher.js';
+import { errorResponse } from './errors.js';
 
 export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN', repository: process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null }), auth = null, requireAuth = false } = {}) {
   auth ??= new AuthService({ site: app.site });
@@ -74,7 +75,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/retry$/.test(u.pathname)){needs('print:write');const b=await body();result=app.retryPrint(u.pathname.split('/')[3],b.verifiedScan);}
       else return send(404,{success:false,errorCode:'NOT_FOUND',message:'Route not found'});
       await app.flush(); send(201,{success:true,data:result});
-    } catch(e){stats.errors++;const status=e instanceof DomainError?e.status:500;if(status>=500)console.error(JSON.stringify({level:'error',site:app.site,errorCode:e.code??'SYSTEM',message:e.message,at:new Date().toISOString()}));send(status,{success:false,errorCode:e.code??'SYSTEM',message:e.message});}
+    } catch(e){stats.errors++;const failure=errorResponse(e instanceof DomainError?e:Object.assign(e,{status:500}));if(failure.status>=500)console.error(JSON.stringify({level:'error',site:app.site,errorCode:e.code??'SYSTEM',message:e.message,at:new Date().toISOString()}));send(failure.status,failure.body);}
   });
   server.stats=stats;return server;
 }
