@@ -1,13 +1,13 @@
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { StoreMesh, DomainError } from './domain.js';
-import { AuthService, authorized } from './auth.js';
+import { AuthService, authRequiredFromEnvironment, authorized } from './auth.js';
 import { JsonRepository } from './persistence.js';
 import { PostgresRepository } from './postgres-repository.js';
 import { OutboxPublisher } from './outbox-publisher.js';
 import { errorResponse } from './errors.js';
 
-export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN', repository: process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null }), auth = null, requireAuth = false } = {}) {
+export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN', repository: process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null }), auth = null, requireAuth = true } = {}) {
   auth ??= new AuthService({ site: app.site });
   if (!auth.users.size) {
     const demoAllowed=process.env.NODE_ENV!=='production'&&process.env.ALLOW_DEMO_CREDENTIALS!=='false';
@@ -87,7 +87,7 @@ export async function createRuntimeServer() {
   else repository = process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null;
   const app = new StoreMesh({ site, repository: process.env.DATABASE_URL ? null : repository, initialState });
   if (process.env.DATABASE_URL) app.repository = repository;
-  const server=createServer({ app, requireAuth:process.env.AUTH_REQUIRED==='true' });
+  const server=createServer({ app, requireAuth:authRequiredFromEnvironment() });
   const publisher=new OutboxPublisher({app,cloudUrl:process.env.CLOUD_URL,siteKey:process.env.SITE_SYNC_KEY});publisher.start();server.on('close',()=>publisher.stop());server.storemesh={app,publisher};return server;
 }
 

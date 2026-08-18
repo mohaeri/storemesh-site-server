@@ -4,6 +4,13 @@ const b64 = value => Buffer.from(JSON.stringify(value)).toString('base64url');
 const parse = value => JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
 const header = b64({ alg:'HS256', typ:'JWT' });
 
+export function authRequiredFromEnvironment(env = process.env) {
+  const configured=env.AUTH_REQUIRED?.trim().toLowerCase();
+  if(configured!==undefined&&!['true','false'].includes(configured))throw new Error('AUTH_REQUIRED must be true or false');
+  if(env.NODE_ENV==='production'&&configured!=='true')throw new Error('Production requires AUTH_REQUIRED=true');
+  return configured!=='false';
+}
+
 export class AuthService {
   constructor({ secret = process.env.AUTH_SECRET, site = 'IRAN', clock = () => Date.now() } = {}) {
     if (!secret && (process.env.NODE_ENV === 'production' || process.env.AUTH_REQUIRED === 'true')) throw new Error('AUTH_SECRET is required when authentication is enabled');
