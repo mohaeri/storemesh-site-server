@@ -40,6 +40,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&u.pathname==='/api/outbox'){needs('audit:read');return send(200,{items:app.state.outbox});}
       if(req.method==='GET'&&u.pathname==='/api/sessions'){needs('inventory:read');return send(200,{items:app.state.sessions});}
       if(req.method==='GET'&&u.pathname==='/api/packages'){needs('inventory:read');return send(200,{items:app.state.packages});}
+      if(req.method==='GET'&&u.pathname==='/api/cycles'){needs('inventory:read');return send(200,{items:app.state.cycles});}
       if(req.method==='GET'&&u.pathname==='/api/shipments'){needs('inventory:read');return send(200,{items:app.state.shipments});}
       if(req.method==='GET'&&u.pathname==='/api/quality-checks'){needs('inventory:read');return send(200,{items:app.state.qualityChecks});}
       if(req.method==='GET'&&u.pathname==='/api/inventory-adjustments'){needs('inventory:read');return send(200,{items:app.state.inventoryAdjustments});}
@@ -56,6 +57,8 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/assign$/.test(u.pathname)){needs('operations:write');const b=await body();result=app.assignBatchToContainer(u.pathname.split('/')[3],b.batchId,b.sessionId,key);}
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/move$/.test(u.pathname)){needs('operations:write');const b=await body();result=app.moveContainer(u.pathname.split('/')[3],b.zone,b.sessionId,key);}
       else if(req.method==='POST'&&u.pathname==='/api/transforms'){needs('operations:write');result=app.transform(await body(),key);}
+      else if(req.method==='POST'&&u.pathname==='/api/cycles'){needs('operations:write');result=app.createCycle(await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/cycles\/[^/]+\/(start|pause|resume|complete|finish|fail|cancel)$/.test(u.pathname)){needs('operations:write');const parts=u.pathname.split('/');result=app.transitionCycle(parts[3],parts[4].toUpperCase(),await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/sorting'){needs('operations:write');result=app.sortBatch(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/packages'){needs('operations:write');result=app.createPackage(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/packages\/[^/]+\/(pack|seal|print|print_success|print_fail|retry|ready|ship)$/.test(u.pathname)){needs('operations:write');const parts=u.pathname.split('/');result=app.transitionPackage(parts[3],parts[4].toUpperCase(),key);}
