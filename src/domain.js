@@ -9,6 +9,8 @@ const CONTAINER_GATES={
   FREEZE_DRY:{field:'trayId',types:['TRAY'],zone:'FREEZE_DRYING',statuses:['FROZEN'],batchStatuses:['FROZEN']},
   DRY:{field:'containerId',types:['BASKET','CRATE','TRAY'],zone:'DRYING',statuses:['READY_FOR_DRYING'],batchStatuses:['SORTED']}
 };
+const CYCLE_TYPES=new Set(['FREEZE','FREEZE_DRY','DRY']);
+const ACTIVE_CYCLE_STATUSES=new Set(['READY','LOADING','RUNNING','IN_PROGRESS','PAUSED','COMPLETING']);
 
 export class DomainError extends Error {
   constructor(code, message, status = 422) { super(message); this.code = code; this.status = status; }
@@ -19,10 +21,10 @@ export class StoreMesh {
     this.site = site; this.clock = clock;
     this.repository = repository;
     this.pendingPersistence = Promise.resolve();
-    this.state = initialState || repository?.load() || { sessions: [], batches: [], measurements: [], movements: [], inventoryAdjustments: [], containers: [], packages: [], shipments: [], internalTransfers: [], labels: [], printAttempts: [], printJobs: [], audit: [], outbox: [], tasks: [], qualityChecks: [], configurationVersions: [], overrides: [], idempotency: new Map(), idempotencyMeta: new Map() };
+    this.state = initialState || repository?.load() || { sessions: [], batches: [], measurements: [], movements: [], inventoryAdjustments: [], containers: [], cycles: [], packages: [], shipments: [], internalTransfers: [], labels: [], printAttempts: [], printJobs: [], audit: [], outbox: [], tasks: [], qualityChecks: [], configurationVersions: [], overrides: [], idempotency: new Map(), idempotencyMeta: new Map() };
     if (this.state instanceof Promise) throw new Error('Async repositories must be loaded before constructing StoreMesh');
     this.state.tasks ??= []; this.state.qualityChecks ??= [];
-    this.state.configurationVersions ??= []; this.state.overrides ??= []; this.state.containers ??= []; this.state.internalTransfers ??= []; this.state.inventoryAdjustments ??= [];this.state.labels??=[];this.state.printAttempts??=[];this.state.idempotencyMeta=this.state.idempotencyMeta instanceof Map?this.state.idempotencyMeta:new Map(this.state.idempotencyMeta??[]);
+    this.state.configurationVersions ??= []; this.state.overrides ??= []; this.state.containers ??= []; this.state.cycles ??= []; this.state.internalTransfers ??= []; this.state.inventoryAdjustments ??= [];this.state.labels??=[];this.state.printAttempts??=[];this.state.idempotencyMeta=this.state.idempotencyMeta instanceof Map?this.state.idempotencyMeta:new Map(this.state.idempotencyMeta??[]);
   }
   persist() {
     if (!this.repository) return;
@@ -106,6 +108,7 @@ export class StoreMesh {
     return this.run(key, 'BATCH_TRANSFORMED', () => {
       const session=this.requireSession(input.sessionId);
       const rule=PROCESS_RULES[input.process];if(!rule)throw new DomainError('PROCESS_NOT_SUPPORTED','Unsupported production process',400);
+      if(CYCLE_TYPES.has(input.process))throw new DomainError('CYCLE_WORKFLOW_REQUIRED',`${input.process} must be performed through a machine cycle; batch identity may not be replaced`,409);
       const requestedInputs = input.inputs?.length ? input.inputs : (input.parentIds ?? []).map(batchId => ({ batchId, consumeWeightKg:this.batch(batchId).weightKg }));
       if (!requestedInputs.length) throw new DomainError('PARENTS_REQUIRED','At least one input is required',400);
       const inputs = requestedInputs.map(x => ({ batch:this.batch(x.batchId), consumeWeightKg:Number(x.consumeWeightKg) }));
@@ -120,6 +123,38 @@ export class StoreMesh {
       if(container){container.batchIds=container.batchIds.filter(id=>!inputs.some(x=>x.batch.id===id&&x.batch.weightKg===0));if(!container.batchIds.includes(child.id))container.batchIds.push(child.id);container.status=rule.status;container.zone=rule.zone;container.activeSessionId=session.id;container.lastDeviceId=session.deviceId}
       this.state.batches.push(child); this.measure(child.id,input.outputWeightKg,input.process,input.sessionId); this.queuePrint('BATCH',child.id,child.code); return child;
     },input);
+  }
+  createCycle(input,key){
+    return this.run(key,'CYCLE_CREATED',()=>{
+      const type=String(input.type??'').toUpperCase();if(!CYCLE_TYPES.has(type))throw new DomainError('CYCLE_TYPE_INVALID','Cycle type must be FREEZE, FREEZE_DRY or DRY',400);
+      const session=this.requireSession(input.sessionId);if(!input.machineId?.trim())throw new DomainError('MACHINE_ID_REQUIRED','A physical machine ID is required',400);
+      const scanned=type==='DRY'?(input.containerIds??[]):(input.trayIds??[]);if(!Array.isArray(scanned)||!scanned.length)throw new DomainError(type==='DRY'?'CONTAINER_SCAN_REQUIRED':'TRAY_SCAN_REQUIRED','At least one physical container must be scanned',400);
+      if(new Set(scanned).size!==scanned.length)throw new DomainError('CYCLE_CONTAINER_DUPLICATE','A container may only be scanned once into a cycle',409);
+      const containers=scanned.map(id=>this.containerForOperation(type,{sessionId:session.id,[CONTAINER_GATES[type].field]:id},[]));
+      for(const c of containers){
+        if(this.state.cycles.some(x=>ACTIVE_CYCLE_STATUSES.has(x.status)&&x.containerIds.includes(c.id)))throw new DomainError('CONTAINER_ACTIVE_CYCLE','Container is already assigned to another active cycle',409);
+        if(!c.batchIds.length)throw new DomainError('CYCLE_CONTAINER_EMPTY','Scanned container has no production batch',409);
+        if(type!=='DRY'&&c.batchIds.length!==1)throw new DomainError('TRAY_SINGLE_BATCH_REQUIRED','Each freeze or freeze-dry tray must contain exactly one batch',409);
+        for(const batchId of c.batchIds)this.containerForOperation(type,{sessionId:session.id,[CONTAINER_GATES[type].field]:c.id},[batchId]);
+      }
+      const batchIds=[...new Set(containers.flatMap(c=>c.batchIds))],prefix={FREEZE:'FC',FREEZE_DRY:'FDC',DRY:'DC'}[type],cycle={id:randomUUID(),code:`${prefix}-${this.clock().slice(0,10).replaceAll('-','')}-${String(this.state.cycles.filter(x=>x.type===type).length+1).padStart(3,'0')}`,type,machineId:input.machineId.trim(),sessionId:session.id,deviceId:session.deviceId,operatorId:session.operatorId,containerIds:containers.map(c=>c.id),batchIds,status:'READY',stateHistory:[{from:null,to:'READY',action:'CREATE',at:this.clock(),sessionId:session.id,deviceId:session.deviceId}],configVersionId:this.activeConfigurationId(type),createdAt:this.clock(),updatedAt:this.clock()};
+      this.state.cycles.push(cycle);for(const c of containers){c.activeCycleId=cycle.id;c.activeSessionId=session.id}return cycle;
+    },input);
+  }
+  transitionCycle(id,action,input,key){
+    return this.run(key,`CYCLE_${action}`,()=>{
+      const cycle=this.state.cycles.find(x=>x.id===id);if(!cycle)throw new DomainError('CYCLE_NOT_FOUND','Cycle not found',404);const session=this.requireSession(input.sessionId);
+      const running=cycle.type==='DRY'?'IN_PROGRESS':'RUNNING',allowed={READY:{START:running,CANCEL:'CANCELLED'},RUNNING:{PAUSE:'PAUSED',COMPLETE:'COMPLETING',FAIL:'FAILED'},IN_PROGRESS:{PAUSE:'PAUSED',COMPLETE:'COMPLETING',FAIL:'FAILED'},PAUSED:{RESUME:running,FAIL:'FAILED',CANCEL:'CANCELLED'},COMPLETING:{FINISH:'COMPLETED',FAIL:'FAILED'}};
+      const next=allowed[cycle.status]?.[action];if(!next)throw new DomainError('CYCLE_TRANSITION_INVALID',`Cannot ${action} a ${cycle.status} ${cycle.type} cycle`,409);
+      if(action==='FINISH'){
+        const finalWeights=input.finalWeights??{};
+        if(cycle.type!=='FREEZE')for(const batchId of cycle.batchIds){const weight=Number(finalWeights[batchId]);if(!(weight>0)||weight>this.batch(batchId).weightKg)throw new DomainError('CYCLE_FINAL_WEIGHT_REQUIRED','A valid final weight is required for every batch before unload',400);}
+        for(const batchId of cycle.batchIds){const b=this.batch(batchId),before=b.weightKg;if(cycle.type!=='FREEZE'){this.measure(batchId,Number(finalWeights[batchId]),cycle.type,session.id);b.yieldPercent=Number((b.weightKg/before*100).toFixed(2));b.status=cycle.type==='FREEZE_DRY'?'FREEZE_DRIED':'DRIED';b.zone='PACKAGING';const task={id:randomUUID(),site:this.site,title:`Package ${b.code}`,zone:'PACKAGING',priority:'NORMAL',status:'OPEN',assignedTo:null,entityId:b.id,createdAt:this.clock()};this.state.tasks.push(task)}else{b.status='FROZEN';b.zone='FREEZE_DRYING';}}
+      }
+      const from=cycle.status;cycle.status=next;cycle.updatedAt=this.clock();cycle.stateHistory.push({from,to:next,action,at:this.clock(),sessionId:session.id,deviceId:session.deviceId});if(action==='START')cycle.startedAt=this.clock();
+      if(['COMPLETED','FAILED','CANCELLED'].includes(next)){cycle.endedAt=this.clock();for(const c of this.state.containers.filter(x=>cycle.containerIds.includes(x.id))){c.activeCycleId=null;c.activeSessionId=null;if(next==='COMPLETED')c.status=cycle.type==='FREEZE'?'FROZEN':'READY_FOR_PACKAGING';}}
+      return cycle;
+    },{id,action,...input});
   }
   sortBatch(input,key){return this.run(key,'BATCH_SORTED',()=>{const session=this.requireSession(input.sessionId),parent=this.batch(input.batchId),container=this.containerForOperation('SORT',input,[parent.id]),outputs=input.outputs??[];if(!outputs.length)throw new DomainError('SORT_OUTPUTS_REQUIRED','Sorting requires outputs',400);const total=outputs.reduce((n,x)=>n+Number(x.weightKg),0);if(!(total>0)||total>parent.weightKg)throw new DomainError('SORT_WEIGHT_INVALID','Sorted output exceeds available weight',409);const children=outputs.map(x=>{if(!(x.weightKg>0)||!x.grade||!x.size)throw new DomainError('SORT_OUTPUT_INVALID','Every output needs positive weight, grade and size',400);const child={id:randomUUID(),code:`B-${this.site}-${String(this.state.batches.length+1).padStart(6,'0')}`,site:this.site,supplier:null,product:parent.product,grade:x.grade,size:x.size,weightKg:Number(x.weightKg),zone:x.zone??'SORTING',status:'SORTED',sessionId:session.id,deviceId:session.deviceId,parentIds:[parent.id],relationshipType:'GRADE_SPLIT',process:'SORT',configVersionId:this.activeConfigurationId('SORTING'),createdAt:this.clock()};this.state.batches.push(child);this.measure(child.id,child.weightKg,'SORT',input.sessionId);this.queuePrint('BATCH',child.id,child.code);return child});parent.weightKg=Number((parent.weightKg-total).toFixed(3));if(parent.weightKg===0){parent.status='CONSUMED';container.batchIds=container.batchIds.filter(id=>id!==parent.id)}container.status='SORTED';container.zone='SORTING';container.activeSessionId=session.id;container.lastDeviceId=session.deviceId;return{children,remainingWeightKg:parent.weightKg,lossKg:Number(input.lossKg??0),containerId:container.id};},input);}
   createPackage(input, key) {

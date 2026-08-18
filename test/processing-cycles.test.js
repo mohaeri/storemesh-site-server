@@ -1,0 +1,19 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { StoreMesh } from '../src/domain.js';
+
+let n=0;const key=p=>`${p}-${++n}`;
+function fixture(type){
+  const app=new StoreMesh(),session=app.openSession('operator','DEVICE-CYCLE-01'),receiving=app.createContainer({capacityKg:100},key('receiving')),batch=app.receive({sessionId:session.id,containerId:receiving.id,supplier:'S',product:'Truffle',grade:'A',size:'L',weightKg:10},key('receive'));
+  const isDry=type==='DRY',container=app.createContainer({type:isDry?'BASKET':'TRAY',stage:'POST_SORT',capacityKg:100},key('process-container'));app.assignBatchToContainer(container.id,batch.id,session.id,key('assign'));
+  batch.status=type==='FREEZE'?'SLICED':type==='FREEZE_DRY'?'FROZEN':'SORTED';container.zone=type==='FREEZE'?'FREEZING':type==='FREEZE_DRY'?'FREEZE_DRYING':'DRYING';container.status=type==='FREEZE'?'SLICED':type==='FREEZE_DRY'?'FROZEN':'READY_FOR_DRYING';container.activeSessionId=null;batch.zone=container.zone;
+  return{app,session,batch,container,input:{type,machineId:`M-${type}`,sessionId:session.id,...(isDry?{containerIds:[container.id]}:{trayIds:[container.id]})}};
+}
+
+test('legacy transform cannot replace batch identity for machine-cycle processes',()=>{for(const type of ['FREEZE','FREEZE_DRY','DRY']){const{app,session,batch,container}=fixture(type);assert.throws(()=>app.transform({sessionId:session.id,inputs:[{batchId:batch.id,consumeWeightKg:10}],process:type,outputWeightKg:5,...(type==='DRY'?{containerId:container.id}:{trayId:container.id})},key('legacy')),e=>e.code==='CYCLE_WORKFLOW_REQUIRED');assert.equal(app.state.batches.length,1)}});
+
+test('freeze cycle preserves batch identity and official weight',()=>{const{app,session,batch,input}=fixture('FREEZE'),before=batch.weightKg,cycle=app.createCycle(input,key('cycle'));app.transitionCycle(cycle.id,'START',{sessionId:session.id},key('start'));app.transitionCycle(cycle.id,'COMPLETE',{sessionId:session.id},key('complete'));app.transitionCycle(cycle.id,'FINISH',{sessionId:session.id},key('finish'));assert.equal(cycle.status,'COMPLETED');assert.equal(app.state.batches.length,1);assert.equal(batch.weightKg,before);assert.equal(batch.status,'FROZEN')});
+
+test('freeze-dry and dry require final weight, compute yield and create packaging task',()=>{for(const type of ['FREEZE_DRY','DRY']){const{app,session,batch,input}=fixture(type),cycle=app.createCycle(input,key('cycle'));app.transitionCycle(cycle.id,'START',{sessionId:session.id},key('start'));app.transitionCycle(cycle.id,'COMPLETE',{sessionId:session.id},key('complete'));assert.throws(()=>app.transitionCycle(cycle.id,'FINISH',{sessionId:session.id},key('missing-weight')),e=>e.code==='CYCLE_FINAL_WEIGHT_REQUIRED');app.transitionCycle(cycle.id,'FINISH',{sessionId:session.id,finalWeights:{[batch.id]:4}},key('finish'));assert.equal(app.state.batches.length,1);assert.equal(batch.weightKg,4);assert.equal(batch.yieldPercent,40);assert.equal(app.state.tasks.at(-1).entityId,batch.id)}});
+
+test('active cycles exclusively lock scanned containers and enforce transitions',()=>{const{app,session,container,input}=fixture('FREEZE'),cycle=app.createCycle(input,key('cycle'));assert.throws(()=>app.createCycle({...input,machineId:'M-2'},key('second')),e=>e.code==='CONTAINER_ACTIVE_CYCLE');assert.throws(()=>app.transitionCycle(cycle.id,'FINISH',{sessionId:session.id},key('skip')),e=>e.code==='CYCLE_TRANSITION_INVALID');app.transitionCycle(cycle.id,'START',{sessionId:session.id},key('start'));app.transitionCycle(cycle.id,'PAUSE',{sessionId:session.id},key('pause'));app.transitionCycle(cycle.id,'RESUME',{sessionId:session.id},key('resume'));app.transitionCycle(cycle.id,'FAIL',{sessionId:session.id},key('fail'));assert.equal(container.activeCycleId,null);assert.throws(()=>app.transitionCycle(cycle.id,'COMPLETE',{sessionId:session.id},key('after-fail')),e=>e.code==='CYCLE_TRANSITION_INVALID')});
