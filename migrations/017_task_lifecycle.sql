@@ -1,0 +1,13 @@
+CREATE TABLE IF NOT EXISTS skills (id uuid PRIMARY KEY,code text UNIQUE NOT NULL,name text NOT NULL);
+CREATE TABLE IF NOT EXISTS user_skills (site_id uuid NOT NULL REFERENCES sites(id),user_id uuid NOT NULL REFERENCES users(id),skill_id uuid NOT NULL REFERENCES skills(id),PRIMARY KEY(site_id,user_id,skill_id));
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS required_role text;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS required_skill_id uuid REFERENCES skills(id);
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS depends_on_task_id uuid REFERENCES tasks(id);
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS paused_at timestamptz;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pause_reason text;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS failed_at timestamptz;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS fail_reason text;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
+ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK(status IN('OPEN','IN_PROGRESS','PAUSED','FAILED','COMPLETED'));
+CREATE INDEX IF NOT EXISTS tasks_assignment_idx ON tasks(site_id,assigned_to,status,priority);

@@ -37,7 +37,8 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(requireAuth&&!user)return send(401,{success:false,errorCode:'AUTHENTICATION_REQUIRED',message:'Authentication required'});
       const needs=permission=>{if(requireAuth&&!authorized(user,permission))throw new DomainError('FORBIDDEN','Insufficient permission',403);};
       if(req.method==='POST'&&/^\/api\/auth\/sessions\/[^/]+\/revoke$/.test(u.pathname)){needs('session:revoke');const sessionId=u.pathname.split('/')[4];if(!auth.revokeSession(sessionId,user.sub))throw new DomainError('AUTH_SESSION_NOT_FOUND','Authentication session not found',404);await auth.flush();app.record('AUTH_SESSION_REVOKED',sessionId,{},null,user.deviceId,'SUCCESS');app.persist();await app.flush();return send(200,{success:true,data:{id:sessionId,status:'REVOKED'}});}
-      if(req.method==='GET'&&u.pathname==='/api/tasks'){needs('inventory:read');return send(200,{items:app.state.tasks});}
+      if(req.method==='GET'&&u.pathname==='/api/tasks/recommended'){needs('inventory:read');return send(200,{data:app.recommendedTask({operatorId:user.sub,roles:user.roles,skills:user.skills??[]})});}
+      if(req.method==='GET'&&u.pathname==='/api/tasks'){needs('inventory:read');const assigned=u.searchParams.get('assignedTo'),items=assigned==='me'?app.state.tasks.filter(x=>x.assignedTo===user.sub):app.state.tasks;return send(200,{items});}
       if(req.method==='GET'&&u.pathname==='/api/exceptions'){needs('inventory:read');return send(200,{items:app.state.exceptions});}
       if(req.method==='GET'&&/^\/api\/master-data\/(products|suppliers|grades|sizes|zones|packageTypes)$/.test(u.pathname)){needs('inventory:read');return send(200,{items:app.state.masterData[u.pathname.split('/')[3]]});}
       if(req.method==='GET'&&u.pathname==='/api/containers'){needs('inventory:read');return send(200,{items:app.state.containers});}
@@ -79,7 +80,9 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&u.pathname==='/api/exceptions'){needs('operations:write');result=app.raiseException(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/exceptions\/[^/]+\/assign$/.test(u.pathname)){needs('operations:write');result=app.assignException(u.pathname.split('/')[3],await body(),key);}
       else if(req.method==='POST'&&/^\/api\/exceptions\/[^/]+\/resolve$/.test(u.pathname)){needs('override:approve');const b=await body();result=app.resolveException(u.pathname.split('/')[3],{...b,resolvedBy:user.sub},key);}
-      else if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/claim$/.test(u.pathname)){needs('operations:write');const b=await body();result=app.claimTask(u.pathname.split('/')[3],b.operatorId,key);}
+      else if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/claim$/.test(u.pathname)){needs('operations:write');result=app.claimTask(u.pathname.split('/')[3],{operatorId:user.sub,roles:user.roles,skills:user.skills??[]},key);}
+      else if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/(complete|pause|fail|resume|reopen)$/.test(u.pathname)){needs('operations:write');const parts=u.pathname.split('/');result=app.transitionTask(parts[3],parts[4].toUpperCase(),await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/reassign$/.test(u.pathname)){needs('override:approve');result=app.reassignTask(u.pathname.split('/')[3],await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/quality-checks'){needs('quality:approve');result=app.qualityCheck(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/quality-checks/release'){needs('quality:approve');result=app.releaseQuarantine(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/inventory-adjustments'){needs('inventory:adjust.approve');result=app.adjustInventory(await body(),key);}
