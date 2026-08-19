@@ -38,6 +38,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       const needs=permission=>{if(requireAuth&&!authorized(user,permission))throw new DomainError('FORBIDDEN','Insufficient permission',403);};
       if(req.method==='POST'&&/^\/api\/auth\/sessions\/[^/]+\/revoke$/.test(u.pathname)){needs('session:revoke');const sessionId=u.pathname.split('/')[4];if(!auth.revokeSession(sessionId,user.sub))throw new DomainError('AUTH_SESSION_NOT_FOUND','Authentication session not found',404);await auth.flush();app.record('AUTH_SESSION_REVOKED',sessionId,{},null,user.deviceId,'SUCCESS');app.persist();await app.flush();return send(200,{success:true,data:{id:sessionId,status:'REVOKED'}});}
       if(req.method==='GET'&&u.pathname==='/api/tasks/recommended'){needs('inventory:read');return send(200,{data:app.recommendedTask({operatorId:user.sub,roles:user.roles,skills:user.skills??[]})});}
+      if(req.method==='GET'&&u.pathname==='/api/devices'){needs('inventory:read');return send(200,{items:app.state.devices});}
       if(req.method==='GET'&&u.pathname==='/api/tasks'){needs('inventory:read');const assigned=u.searchParams.get('assignedTo'),items=assigned==='me'?app.state.tasks.filter(x=>x.assignedTo===user.sub):app.state.tasks;return send(200,{items});}
       if(req.method==='GET'&&u.pathname==='/api/exceptions'){needs('inventory:read');return send(200,{items:app.state.exceptions});}
       if(req.method==='GET'&&/^\/api\/master-data\/(products|suppliers|grades|sizes|zones|packageTypes)$/.test(u.pathname)){needs('inventory:read');return send(200,{items:app.state.masterData[u.pathname.split('/')[3]]});}
@@ -58,6 +59,9 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&/^\/api\/shipments\/[^/]+\/manifest$/.test(u.pathname))return send(200,app.shipmentManifest(u.pathname.split('/')[3]));
       if(req.method==='GET'&&u.pathname.startsWith('/api/trace/')) return send(200,app.trace(u.pathname.split('/').at(-1)));
       if(req.method==='POST'&&u.pathname==='/api/sessions'){needs('operations:write');const b=await body();result=app.openSession(b.operatorId,b.deviceId,b.station);}
+      else if(req.method==='POST'&&u.pathname==='/api/devices'){needs('config:write');result=app.registerDevice(await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/devices\/[^/]+\/heartbeat$/.test(u.pathname)){needs('operations:write');result=app.heartbeatDevice(u.pathname.split('/')[3]);}
+      else if(req.method==='POST'&&/^\/api\/devices\/[^/]+\/retire$/.test(u.pathname)){needs('config:write');result=app.retireDevice(u.pathname.split('/')[3],key);}
       else if(req.method==='POST'&&/^\/api\/master-data\/(products|suppliers|grades|sizes|zones|packageTypes)$/.test(u.pathname)){needs('master-data:write');result=app.createReference(u.pathname.split('/')[3],await body(),key);}
       else if(req.method==='POST'&&/^\/api\/master-data\/(products|suppliers|grades|sizes|zones|packageTypes)\/[^/]+\/update$/.test(u.pathname)){needs('master-data:write');const parts=u.pathname.split('/');result=app.updateReference(parts[3],parts[4],await body(),key);}
       else if(req.method==='POST'&&/^\/api\/sessions\/[^/]+\/draft$/.test(u.pathname)){needs('operations:write');result=app.saveSessionDraft(u.pathname.split('/')[3],(await body()).draft);}

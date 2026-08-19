@@ -15,6 +15,7 @@ const ACTIVE_CYCLE_STATUSES=new Set(['READY','LOADING','RUNNING','IN_PROGRESS','
 const UUID_PATTERN=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const REFERENCE_TYPES=new Set(['products','suppliers','grades','sizes','zones','packageTypes']);
 const DEMO_REFERENCES={products:['T','Truffle','Fruit'],suppliers:['S','S1'],grades:['A','B','UNSORTED'],sizes:['L','Large','MIXED','S','M'],zones:['RECEIVING','COLD_ROOM','SORTING','WASHING','SLICING','FREEZING','FREEZE_DRYING','DRYING','PROCESSING','PACKAGING','QC','QUARANTINE','WASTE'],packageTypes:['POUCH','CARTON','EPS','PALLET']};
+const DEMO_DEVICES=['TEST-DEVICE','TEST-TERMINAL-01','TEST-TERMINAL-02','RT-01','DEVICE-01','DEVICE-CYCLE-01','PDA-PACK-01','device-1'];
 
 export class DomainError extends Error {
   constructor(code, message, status = 422) { super(message); this.code = code; this.status = status; }
@@ -29,9 +30,10 @@ export class StoreMesh {
     this.lastPersistenceError = null;this.persistenceErrorLogger=persistenceErrorLogger;
     this.state = initialState || repository?.load() || { sessions: [], batches: [], measurements: [], movements: [], inventoryAdjustments: [], containers: [], cycles: [], packages: [], shipments: [], internalTransfers: [], labels: [], printAttempts: [], printJobs: [], audit: [], outbox: [], tasks: [], qualityChecks: [], exceptions: [], configurationVersions: [], overrides: [], idempotency: new Map(), idempotencyMeta: new Map() };
     if (this.state instanceof Promise) throw new Error('Async repositories must be loaded before constructing StoreMesh');
-    this.state.tasks ??= []; this.state.qualityChecks ??= [];this.state.exceptions??=[];this.state.cartonScanEvents??=[];
+    this.state.tasks ??= []; this.state.qualityChecks ??= [];this.state.exceptions??=[];this.state.cartonScanEvents??=[];this.state.devices??=[];
     this.state.configurationVersions ??= []; this.state.overrides ??= []; this.state.containers ??= []; this.state.cycles ??= []; this.state.internalTransfers ??= []; this.state.inventoryAdjustments ??= [];this.state.labels??=[];this.state.printAttempts??=[];this.state.idempotencyMeta=this.state.idempotencyMeta instanceof Map?this.state.idempotencyMeta:new Map(this.state.idempotencyMeta??[]);
     this.state.masterData??=Object.fromEntries([...REFERENCE_TYPES].map(type=>[type,seedDemoReferences?(DEMO_REFERENCES[type]??[]).map(code=>({id:randomUUID(),code,name:code,status:'ACTIVE'})):[]]));
+    if(seedDemoReferences&&!this.state.devices.length)this.state.devices=DEMO_DEVICES.map(code=>({id:randomUUID(),code,type:code.includes('PDA')?'PDA':'TERMINAL',status:'ACTIVE',assignedStation:null,lastSeenAt:null,createdAt:this.clock()}));
     this.lastDurableState=structuredClone(this.state);
   }
   persist() {
@@ -69,9 +71,13 @@ export class StoreMesh {
   }
   openSession(operatorId, deviceId, station = 'terminal-01') {
     if(!deviceId?.trim())throw new DomainError('DEVICE_ID_REQUIRED','A registered originating device ID is required',400);
+    const device=this.state.devices.find(x=>x.code===deviceId.trim());if(!device||device.status!=='ACTIVE')throw new DomainError('DEVICE_NOT_ACTIVE','Device is not registered and active for this site',403);if(device.assignedStation&&device.assignedStation!==station)throw new DomainError('DEVICE_STATION_MISMATCH','Device is assigned to a different station',403);device.lastSeenAt=this.clock();
     const session = { id: randomUUID(), site: this.site, operatorId, deviceId:deviceId.trim(), station, status: 'ACTIVE', startedAt: this.clock(), updatedAt: this.clock() };
     this.state.sessions.push(session); this.record('SESSION_OPENED', session.id,{},session.id,session.deviceId); this.persist(); return session;
   }
+  registerDevice(input,key){return this.run(key,'DEVICE_REGISTERED',()=>{const code=String(input.code??'').trim();if(!code||!['TERMINAL','PDA','SCALE','PRINTER'].includes(input.type))throw new DomainError('DEVICE_FIELDS_INVALID','Device code and supported type are required',400);if(this.state.devices.some(x=>x.code===code))throw new DomainError('DEVICE_CODE_DUPLICATE','Device code already exists',409);const device={id:randomUUID(),code,type:input.type,status:'ACTIVE',assignedStation:input.assignedStation??null,lastSeenAt:null,createdAt:this.clock()};this.state.devices.push(device);return device},input)}
+  heartbeatDevice(code){const device=this.state.devices.find(x=>x.code===code);if(!device)throw new DomainError('DEVICE_NOT_FOUND','Device not found',404);if(device.status!=='ACTIVE')throw new DomainError('DEVICE_RETIRED','Retired device cannot send heartbeat',409);device.lastSeenAt=this.clock();this.record('DEVICE_HEARTBEAT',device.id);this.persist();return device}
+  retireDevice(id,key){return this.run(key,'DEVICE_RETIRED',()=>{const device=this.state.devices.find(x=>x.id===id);if(!device)throw new DomainError('DEVICE_NOT_FOUND','Device not found',404);if(this.state.sessions.some(x=>x.deviceId===device.code&&x.status==='ACTIVE'))throw new DomainError('DEVICE_HAS_ACTIVE_SESSION','Close active device sessions before retirement',409);device.status='RETIRED';return device},{id})}
   requireSession(id) {
     const s = this.state.sessions.find(x => x.id === id);
     if (!s) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
