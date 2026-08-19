@@ -38,6 +38,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       const needs=permission=>{if(requireAuth&&!authorized(user,permission))throw new DomainError('FORBIDDEN','Insufficient permission',403);};
       if(req.method==='POST'&&/^\/api\/auth\/sessions\/[^/]+\/revoke$/.test(u.pathname)){needs('session:revoke');const sessionId=u.pathname.split('/')[4];if(!auth.revokeSession(sessionId,user.sub))throw new DomainError('AUTH_SESSION_NOT_FOUND','Authentication session not found',404);await auth.flush();app.record('AUTH_SESSION_REVOKED',sessionId,{},null,user.deviceId,'SUCCESS');app.persist();await app.flush();return send(200,{success:true,data:{id:sessionId,status:'REVOKED'}});}
       if(req.method==='GET'&&u.pathname==='/api/tasks'){needs('inventory:read');return send(200,{items:app.state.tasks});}
+      if(req.method==='GET'&&/^\/api\/master-data\/(products|suppliers|grades|sizes|zones|packageTypes)$/.test(u.pathname)){needs('inventory:read');return send(200,{items:app.state.masterData[u.pathname.split('/')[3]]});}
       if(req.method==='GET'&&u.pathname==='/api/containers'){needs('inventory:read');return send(200,{items:app.state.containers});}
       if(req.method==='GET'&&u.pathname==='/api/configurations'){needs('inventory:read');return send(200,{items:app.state.configurationVersions});}
       if(req.method==='GET'&&u.pathname==='/api/overrides'){needs('inventory:read');return send(200,{items:app.state.overrides});}
@@ -55,6 +56,8 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&/^\/api\/shipments\/[^/]+\/manifest$/.test(u.pathname))return send(200,app.shipmentManifest(u.pathname.split('/')[3]));
       if(req.method==='GET'&&u.pathname.startsWith('/api/trace/')) return send(200,app.trace(u.pathname.split('/').at(-1)));
       if(req.method==='POST'&&u.pathname==='/api/sessions'){needs('operations:write');const b=await body();result=app.openSession(b.operatorId,b.deviceId,b.station);}
+      else if(req.method==='POST'&&/^\/api\/master-data\/(products|suppliers|grades|sizes|zones|packageTypes)$/.test(u.pathname)){needs('master-data:write');result=app.createReference(u.pathname.split('/')[3],await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/master-data\/(products|suppliers|grades|sizes|zones|packageTypes)\/[^/]+\/update$/.test(u.pathname)){needs('master-data:write');const parts=u.pathname.split('/');result=app.updateReference(parts[3],parts[4],await body(),key);}
       else if(req.method==='POST'&&/^\/api\/sessions\/[^/]+\/draft$/.test(u.pathname)){needs('operations:write');result=app.saveSessionDraft(u.pathname.split('/')[3],(await body()).draft);}
       else if(req.method==='POST'&&/^\/api\/sessions\/[^/]+\/(suspend|resume|complete|cancel)$/.test(u.pathname)){needs('operations:write');const parts=u.pathname.split('/');result=app.updateSession(parts[3],parts[4].toUpperCase());}
       else if(req.method==='POST'&&u.pathname==='/api/receiving'){needs('receiving:write');result=app.receive(await body(),key);}
@@ -66,7 +69,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&u.pathname==='/api/cycles'){const b=await body();needs(b.type==='FREEZE'?'freezing:write':'drying:write');result=app.createCycle(b,key);}
       else if(req.method==='POST'&&/^\/api\/cycles\/[^/]+\/(start|pause|resume|complete|finish|fail|cancel)$/.test(u.pathname)){const parts=u.pathname.split('/'),cycle=app.state.cycles.find(x=>x.id===parts[3]);needs(cycle?.type==='FREEZE'?'freezing:write':'drying:write');result=app.transitionCycle(parts[3],parts[4].toUpperCase(),await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/sorting'){needs('sorting:write');result=app.sortBatch(await body(),key);}
-      else if(req.method==='POST'&&u.pathname==='/api/packages'){needs('packaging:write');result=app.createPackage(await body(),key);}
+      else if(req.method==='POST'&&u.pathname==='/api/packages'){needs('packaging:write');const b=await body();app.reference('packageTypes',b.type);result=app.createPackage(b,key);}
       else if(req.method==='POST'&&/^\/api\/packages\/[^/]+\/(pack|seal|print|print_success|print_fail|retry|ready|ship)$/.test(u.pathname)){needs('packaging:write');const parts=u.pathname.split('/');result=app.transitionPackage(parts[3],parts[4].toUpperCase(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/shipments'){needs('shipping:write');result=app.createShipment(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/internal-transfers/receive'){needs('operations:write');result=app.receiveInternalTransfer(await body(),key);}
