@@ -66,6 +66,8 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/master-data\/(products|suppliers|grades|sizes|zones|packageTypes)\/[^/]+\/update$/.test(u.pathname)){needs('master-data:write');const parts=u.pathname.split('/');result=app.updateReference(parts[3],parts[4],await body(),key);}
       else if(req.method==='POST'&&/^\/api\/sessions\/[^/]+\/draft$/.test(u.pathname)){needs('operations:write');result=app.saveSessionDraft(u.pathname.split('/')[3],(await body()).draft);}
       else if(req.method==='POST'&&/^\/api\/sessions\/[^/]+\/(suspend|resume|complete|cancel)$/.test(u.pathname)){needs('operations:write');const parts=u.pathname.split('/');result=app.updateSession(parts[3],parts[4].toUpperCase());}
+      else if(req.method==='POST'&&/^\/api\/sessions\/[^/]+\/terminate$/.test(u.pathname)){needs('session:terminate');result=app.forceCloseSession(u.pathname.split('/')[3],user.sub);}
+      else if(req.method==='POST'&&/^\/api\/sessions\/[^/]+\/handover$/.test(u.pathname)){needs('operations:write');result=app.handoverSession(u.pathname.split('/')[3],user.sub,(await body()).toOperatorId);}
       else if(req.method==='POST'&&u.pathname==='/api/receiving'){needs('receiving:write');result=app.receive(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/movements'){needs('storage:write');const b=await body();result=app.move(b.batchId,b.zone,b.sessionId,key,b.overrideId);}
       else if(req.method==='POST'&&u.pathname==='/api/containers'){needs('storage:write');result=app.createContainer(await body(),key);}
@@ -102,7 +104,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
     } catch(e){stats.errors++;app.record('REQUEST_FAILED',null,{method:req.method,path:req.url,errorCode:e.code??'SYSTEM'},null,auditContext.deviceId,'FAILURE');app.persist();const failure=errorResponse(e);if(failure.status>=500)console.error(JSON.stringify({level:'error',site:app.site,errorCode:e.code??'SYSTEM',message:e.message,at:new Date().toISOString()}));send(failure.status,failure.body);}
     });
   });
-  server.stats=stats;return server;
+  const idleSweep=setInterval(()=>app.sweepIdleSessions(),Math.min(Math.max(1000,Math.floor(app.idleSessionMs/2)),60000));idleSweep.unref();server.on('close',()=>clearInterval(idleSweep));server.stats=stats;return server;
 }
 
 export async function createRuntimeServer() {

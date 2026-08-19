@@ -22,9 +22,9 @@ export class DomainError extends Error {
 }
 
 export class StoreMesh {
-  constructor({ site = 'IRAN', clock = () => new Date().toISOString(), repository = null, initialState = null, seedDemoReferences = process.env.NODE_ENV!=='production', persistenceErrorLogger = error => console.error(JSON.stringify({level:'error',component:'persistence',errorCode:error.code??'PERSISTENCE_FAILED',message:error.message,at:new Date().toISOString()})) } = {}) {
+  constructor({ site = 'IRAN', clock = () => new Date().toISOString(), repository = null, initialState = null, seedDemoReferences = process.env.NODE_ENV!=='production',idleSessionMs=Number(process.env.SESSION_IDLE_TIMEOUT_MS||1800000), persistenceErrorLogger = error => console.error(JSON.stringify({level:'error',component:'persistence',errorCode:error.code??'PERSISTENCE_FAILED',message:error.message,at:new Date().toISOString()})) } = {}) {
     this.site = site; this.clock = clock;
-    this.repository = repository;
+    this.repository = repository;this.idleSessionMs=idleSessionMs;
     this.auditContext = new AsyncLocalStorage();
     this.pendingPersistence = Promise.resolve();
     this.lastPersistenceError = null;this.persistenceErrorLogger=persistenceErrorLogger;
@@ -72,7 +72,7 @@ export class StoreMesh {
   openSession(operatorId, deviceId, station = 'terminal-01') {
     if(!deviceId?.trim())throw new DomainError('DEVICE_ID_REQUIRED','A registered originating device ID is required',400);
     const device=this.state.devices.find(x=>x.code===deviceId.trim());if(!device||device.status!=='ACTIVE')throw new DomainError('DEVICE_NOT_ACTIVE','Device is not registered and active for this site',403);if(device.assignedStation&&device.assignedStation!==station)throw new DomainError('DEVICE_STATION_MISMATCH','Device is assigned to a different station',403);device.lastSeenAt=this.clock();
-    const session = { id: randomUUID(), site: this.site, operatorId, deviceId:deviceId.trim(), station, status: 'ACTIVE', startedAt: this.clock(), updatedAt: this.clock() };
+    const session = { id: randomUUID(), site: this.site, operatorId, deviceId:deviceId.trim(), station, status: 'ACTIVE', startedAt: this.clock(), updatedAt: this.clock(),lastActivityAt:this.clock() };
     this.state.sessions.push(session); this.record('SESSION_OPENED', session.id,{},session.id,session.deviceId); this.persist(); return session;
   }
   registerDevice(input,key){return this.run(key,'DEVICE_REGISTERED',()=>{const code=String(input.code??'').trim();if(!code||!['TERMINAL','PDA','SCALE','PRINTER'].includes(input.type))throw new DomainError('DEVICE_FIELDS_INVALID','Device code and supported type are required',400);if(this.state.devices.some(x=>x.code===code))throw new DomainError('DEVICE_CODE_DUPLICATE','Device code already exists',409);const device={id:randomUUID(),code,type:input.type,status:'ACTIVE',assignedStation:input.assignedStation??null,lastSeenAt:null,createdAt:this.clock()};this.state.devices.push(device);return device},input)}
@@ -81,14 +81,18 @@ export class StoreMesh {
   requireSession(id) {
     const s = this.state.sessions.find(x => x.id === id);
     if (!s) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
-    if (s.status !== 'ACTIVE') throw new DomainError('SESSION_NOT_ACTIVE', 'Session is not active', 409); return s;
+    if(s.status==='ACTIVE'&&Date.parse(this.clock())-Date.parse(s.lastActivityAt??s.updatedAt??s.startedAt)>this.idleSessionMs){s.status='SUSPENDED';s.updatedAt=this.clock();this.record('SESSION_TIMED_OUT',s.id,{idleSessionMs:this.idleSessionMs},s.id,s.deviceId);this.persist()}
+    if (s.status !== 'ACTIVE') throw new DomainError('SESSION_NOT_ACTIVE', 'Session is not active', 409);s.lastActivityAt=this.clock();s.updatedAt=s.lastActivityAt; return s;
   }
+  sweepIdleSessions(){let count=0;for(const s of this.state.sessions.filter(x=>x.status==='ACTIVE'))if(Date.parse(this.clock())-Date.parse(s.lastActivityAt??s.updatedAt??s.startedAt)>this.idleSessionMs){s.status='SUSPENDED';s.updatedAt=this.clock();this.record('SESSION_TIMED_OUT',s.id,{idleSessionMs:this.idleSessionMs},s.id,s.deviceId);count++}if(count)this.persist();return count}
   updateSession(id, action) {
     const s=this.state.sessions.find(x=>x.id===id);if(!s)throw new DomainError('SESSION_NOT_FOUND','Session not found',404);
     const allowed={ACTIVE:{SUSPEND:'SUSPENDED',COMPLETE:'COMPLETED',CANCEL:'CANCELLED'},SUSPENDED:{RESUME:'ACTIVE',CANCEL:'CANCELLED'}};
     const next=allowed[s.status]?.[action];if(!next)throw new DomainError('SESSION_TRANSITION_INVALID',`Cannot ${action} a ${s.status} session`,409);
     s.status=next;s.updatedAt=this.clock();if(next!=='ACTIVE')for(const c of this.state.containers)if(c.activeSessionId===s.id)c.activeSessionId=null;if(['COMPLETED','CANCELLED'].includes(next))s.closedAt=this.clock();this.record(`SESSION_${next}`,s.id,{},s.id);this.persist();return s;
   }
+  forceCloseSession(id,actorId){const s=this.state.sessions.find(x=>x.id===id);if(!s)throw new DomainError('SESSION_NOT_FOUND','Session not found',404);if(!['ACTIVE','SUSPENDED'].includes(s.status))throw new DomainError('SESSION_TRANSITION_INVALID','Session is already closed',409);s.status='CANCELLED';s.terminatedBy=actorId;s.closedAt=this.clock();s.updatedAt=this.clock();this.record('SESSION_FORCE_CLOSED',s.id,{terminatedBy:actorId},s.id,s.deviceId);this.persist();return s}
+  handoverSession(id,fromOperatorId,toOperatorId){const s=this.requireSession(id);if(s.operatorId!==fromOperatorId||!toOperatorId?.trim())throw new DomainError('SESSION_HANDOVER_INVALID','Active owner and target operator are required',403);const previous=s.operatorId;s.operatorId=toOperatorId.trim();s.handedOverFrom=previous;s.updatedAt=this.clock();s.lastActivityAt=s.updatedAt;this.record('SESSION_HANDED_OVER',s.id,{fromOperatorId:previous,toOperatorId:s.operatorId},s.id,s.deviceId);this.persist();return s}
   saveSessionDraft(id,draft){const s=this.requireSession(id);s.draft=structuredClone(draft??{});s.updatedAt=this.clock();this.record('SESSION_DRAFT_SAVED',s.id,{draft:s.draft},s.id);this.persist();return s}
   containerForOperation(operation,input,batchIds=[]){
     const gate=CONTAINER_GATES[operation],requiredZone=this.reference('zones',gate.zone),id=input[gate.field];

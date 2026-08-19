@@ -1,0 +1,10 @@
+ALTER TABLE operational_sessions ADD COLUMN IF NOT EXISTS last_activity_at timestamptz;
+UPDATE operational_sessions SET last_activity_at=COALESCE(updated_at,started_at) WHERE last_activity_at IS NULL;
+ALTER TABLE operational_sessions ALTER COLUMN last_activity_at SET NOT NULL;
+ALTER TABLE operational_sessions ALTER COLUMN last_activity_at SET DEFAULT now();
+ALTER TABLE operational_sessions ADD COLUMN IF NOT EXISTS terminated_by text;
+ALTER TABLE operational_sessions ADD COLUMN IF NOT EXISTS handed_over_from text;
+CREATE INDEX IF NOT EXISTS operational_sessions_idle_idx ON operational_sessions(site_id,status,last_activity_at);
+CREATE OR REPLACE FUNCTION sync_session_activity() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN NEW.last_activity_at=NEW.updated_at;RETURN NEW;END$$;
+DROP TRIGGER IF EXISTS operational_sessions_sync_activity ON operational_sessions;
+CREATE TRIGGER operational_sessions_sync_activity BEFORE INSERT OR UPDATE OF updated_at ON operational_sessions FOR EACH ROW EXECUTE FUNCTION sync_session_activity();

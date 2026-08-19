@@ -60,7 +60,7 @@ export class AuthService {
 }
 
 export const permissions = {
-  ADMIN: ['*'], MANAGER: ['inventory:read','operations:write','storage:write','shipment:write','print:write','quality:approve','inventory:adjust.approve','config:write','config:approve','override:approve','audit:read','session:revoke','master-data:write'],
+  ADMIN: ['*'], MANAGER: ['inventory:read','operations:write','storage:write','shipment:write','print:write','quality:approve','inventory:adjust.approve','config:write','config:approve','override:approve','audit:read','session:revoke','session:terminate','master-data:write'],
   RECEIVING_OPERATOR:['inventory:read','operations:write','receiving:write','print:write'],STORAGE_OPERATOR:['inventory:read','operations:write','storage:write'],SORTING_OPERATOR:['inventory:read','operations:write','sorting:write','print:write'],WASHING_OPERATOR:['inventory:read','operations:write','washing:write'],SLICING_OPERATOR:['inventory:read','operations:write','slicing:write'],FREEZING_OPERATOR:['inventory:read','operations:write','freezing:write'],DRYING_OPERATOR:['inventory:read','operations:write','drying:write'],PACKAGING_OPERATOR:['inventory:read','operations:write','packaging:write','print:write'],SHIPPING_OPERATOR:['inventory:read','shipping:write','shipment:write'],QUALITY_OPERATOR:['inventory:read','quality:approve','inventory:adjust.approve','audit:read'], VIEWER: ['inventory:read']
 };
 export function authorized(user, permission) { return user?.roles?.some(role => permissions[role]?.includes('*') || permissions[role]?.includes(permission)); }
