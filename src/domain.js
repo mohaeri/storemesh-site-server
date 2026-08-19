@@ -18,11 +18,12 @@ export class DomainError extends Error {
 }
 
 export class StoreMesh {
-  constructor({ site = 'IRAN', clock = () => new Date().toISOString(), repository = null, initialState = null } = {}) {
+  constructor({ site = 'IRAN', clock = () => new Date().toISOString(), repository = null, initialState = null, persistenceErrorLogger = error => console.error(JSON.stringify({level:'error',component:'persistence',errorCode:error.code??'PERSISTENCE_FAILED',message:error.message,at:new Date().toISOString()})) } = {}) {
     this.site = site; this.clock = clock;
     this.repository = repository;
     this.auditContext = new AsyncLocalStorage();
     this.pendingPersistence = Promise.resolve();
+    this.lastPersistenceError = null;this.persistenceErrorLogger=persistenceErrorLogger;
     this.state = initialState || repository?.load() || { sessions: [], batches: [], measurements: [], movements: [], inventoryAdjustments: [], containers: [], cycles: [], packages: [], shipments: [], internalTransfers: [], labels: [], printAttempts: [], printJobs: [], audit: [], outbox: [], tasks: [], qualityChecks: [], configurationVersions: [], overrides: [], idempotency: new Map(), idempotencyMeta: new Map() };
     if (this.state instanceof Promise) throw new Error('Async repositories must be loaded before constructing StoreMesh');
     this.state.tasks ??= []; this.state.qualityChecks ??= [];
@@ -34,10 +35,11 @@ export class StoreMesh {
       const snapshot = structuredClone({ ...this.state, idempotency: [...this.state.idempotency.entries()], idempotencyMeta:[...this.state.idempotencyMeta.entries()] });
       snapshot.idempotency = new Map(snapshot.idempotency);
       snapshot.idempotencyMeta = new Map(snapshot.idempotencyMeta);
-      this.pendingPersistence = this.pendingPersistence.then(() => this.repository.save(snapshot));
+      const write=this.pendingPersistence.then(() => this.repository.save(snapshot));
+      this.pendingPersistence=write.catch(error=>{this.lastPersistenceError??=error;this.persistenceErrorLogger(error)});
     } else this.repository.save(this.state);
   }
-  async flush() { await this.pendingPersistence; }
+  async flush() { await this.pendingPersistence;if(this.lastPersistenceError){const error=this.lastPersistenceError;this.lastPersistenceError=null;throw error} }
   withAuditContext(context,fn){return this.auditContext.run(context,fn)}
   run(key, action, fn, request = {}) {
     const now=Date.parse(this.clock());for(const[k,meta]of this.state.idempotencyMeta)if(Date.parse(meta.expiresAt)<=now){this.state.idempotencyMeta.delete(k);this.state.idempotency.delete(k)}
