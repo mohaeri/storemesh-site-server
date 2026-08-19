@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS roles (
-  id uuid PRIMARY KEY, site_id uuid NOT NULL REFERENCES sites(id), code text NOT NULL,
+  id uuid PRIMARY KEY, site_id uuid NOT NULL REFERENCES sites(id) ON DELETE CASCADE, code text NOT NULL,
   name text NOT NULL, built_in boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(site_id,code)
 );
@@ -8,12 +8,12 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   PRIMARY KEY(role_id,permission)
 );
 CREATE TABLE IF NOT EXISTS user_roles (
-  site_id uuid NOT NULL REFERENCES sites(id), user_id uuid NOT NULL REFERENCES users(id),
-  role_id uuid NOT NULL REFERENCES roles(id), PRIMARY KEY(site_id,user_id,role_id)
+  site_id uuid NOT NULL REFERENCES sites(id) ON DELETE CASCADE, user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id uuid NOT NULL REFERENCES roles(id) ON DELETE CASCADE, PRIMARY KEY(site_id,user_id,role_id)
 );
 
 CREATE TABLE IF NOT EXISTS qc_checklists (
-  id uuid PRIMARY KEY, site_id uuid NOT NULL REFERENCES sites(id), code text NOT NULL,
+  id uuid PRIMARY KEY, site_id uuid NOT NULL REFERENCES sites(id) ON DELETE CASCADE, code text NOT NULL,
   product text NOT NULL, stage text NOT NULL, name text NOT NULL, active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(site_id,code)
 );
@@ -22,10 +22,10 @@ CREATE TABLE IF NOT EXISTS qc_checklist_items (
   code text NOT NULL, prompt text NOT NULL, required boolean NOT NULL DEFAULT true, sequence_no integer NOT NULL,
   UNIQUE(checklist_id,code), UNIQUE(checklist_id,sequence_no)
 );
-ALTER TABLE quality_checks ADD COLUMN IF NOT EXISTS checklist_id uuid REFERENCES qc_checklists(id);
+ALTER TABLE quality_checks ADD COLUMN IF NOT EXISTS checklist_id uuid REFERENCES qc_checklists(id) ON DELETE SET NULL;
 ALTER TABLE quality_checks ADD COLUMN IF NOT EXISTS responses jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE quality_checks ADD COLUMN IF NOT EXISTS attestation jsonb;
-ALTER TABLE quality_checks ADD COLUMN IF NOT EXISTS corrective_task_id uuid REFERENCES tasks(id);
+ALTER TABLE quality_checks ADD COLUMN IF NOT EXISTS corrective_task_id uuid REFERENCES tasks(id) ON DELETE SET NULL;
 
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS before_state jsonb;
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS after_state jsonb;
