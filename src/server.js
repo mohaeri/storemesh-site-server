@@ -7,14 +7,15 @@ import { JsonRepository } from './persistence.js';
 import { PostgresRepository } from './postgres-repository.js';
 import { OutboxPublisher } from './outbox-publisher.js';
 import { errorResponse } from './errors.js';
+export const BOOTSTRAP_ADMIN_ID='00000000-0000-4000-a000-000000000001',BOOTSTRAP_OPERATOR_ID='00000000-0000-4000-a000-000000000002';
 
 export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN', repository: process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null }), auth = null, requireAuth = true } = {}) {
   auth ??= new AuthService({ site: app.site });
   if (!auth.users.size) {
     const demoAllowed=process.env.NODE_ENV!=='production'&&process.env.ALLOW_DEMO_CREDENTIALS!=='false';
     if(!demoAllowed&&(!process.env.BOOTSTRAP_ADMIN_USER||!process.env.BOOTSTRAP_ADMIN_PASSWORD))throw new Error('Production bootstrap credentials are required');
-    auth.addUser({ id:'admin-1', username:process.env.BOOTSTRAP_ADMIN_USER||'admin', password:process.env.BOOTSTRAP_ADMIN_PASSWORD||'storemesh-demo', roles:['ADMIN'] });
-    if(demoAllowed)auth.addUser({ id:'operator-1', username:'operator', password:'operator-demo', roles:['RECEIVING_OPERATOR','STORAGE_OPERATOR','SORTING_OPERATOR','WASHING_OPERATOR','SLICING_OPERATOR','FREEZING_OPERATOR','DRYING_OPERATOR','PACKAGING_OPERATOR','SHIPPING_OPERATOR'] });
+    auth.addUser({ id:BOOTSTRAP_ADMIN_ID, username:process.env.BOOTSTRAP_ADMIN_USER||'admin', password:process.env.BOOTSTRAP_ADMIN_PASSWORD||'storemesh-demo', roles:['ADMIN'] });
+    if(demoAllowed)auth.addUser({ id:BOOTSTRAP_OPERATOR_ID, username:'operator', password:'operator-demo', roles:['RECEIVING_OPERATOR','STORAGE_OPERATOR','SORTING_OPERATOR','WASHING_OPERATOR','SLICING_OPERATOR','FREEZING_OPERATOR','DRYING_OPERATOR','PACKAGING_OPERATOR','SHIPPING_OPERATOR'] });
   }
   const stats={requests:0,errors:0,startedAt:Date.now()};
   const server=http.createServer(async (req,res)=>{
@@ -30,12 +31,12 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&u.pathname==='/health') return send(200,{status:'ok',site:app.site});
       if(req.method==='GET'&&u.pathname==='/ready'){try{if(app.repository?.ready)await app.repository.ready();return send(200,{status:'ready',site:app.site})}catch{return send(503,{status:'not_ready',site:app.site})}}
       if(req.method==='GET'&&u.pathname==='/metrics'){res.writeHead(200,{'Content-Type':'text/plain; version=0.0.4'});return res.end([`storemesh_http_requests_total ${stats.requests}`,`storemesh_http_errors_total ${stats.errors}`,`storemesh_uptime_seconds ${Math.floor((Date.now()-stats.startedAt)/1000)}`,`storemesh_batches ${app.state.batches.length}`,`storemesh_outbox_pending ${app.state.outbox.filter(x=>x.status==='PENDING').length}`,`storemesh_print_jobs_pending ${app.state.printJobs.filter(x=>x.status==='PENDING').length}`].join('\n')+'\n')}
-      if(req.method==='POST'&&u.pathname==='/api/auth/login'){const b=await body();auditContext.deviceId=b.deviceId??null;const token=auth.login(b.username,b.password,b.deviceId),account=auth.users.get(b.username);await auth.flush();auditContext.userId=token?account.id:null;app.record(token?'LOGIN_SUCCEEDED':'LOGIN_FAILED',account?.id??null,{username:b.username},null,b.deviceId??null,token?'SUCCESS':'FAILURE');app.persist();return token?send(200,{success:true,data:{token}}):send(401,{success:false,errorCode:'INVALID_CREDENTIALS',message:'Invalid credentials'});}
+      if(req.method==='POST'&&u.pathname==='/api/auth/login'){const b=await body();auditContext.deviceId=b.deviceId??null;const token=auth.login(b.username,b.password,b.deviceId),account=auth.users.get(b.username);await auth.flush();auditContext.userId=token?account.id:null;app.record(token?'LOGIN_SUCCEEDED':'LOGIN_FAILED',account?.id??null,{username:b.username},null,b.deviceId??null,token?'SUCCESS':'FAILURE');app.persist();await app.flush();return token?send(200,{success:true,data:{token}}):send(401,{success:false,errorCode:'INVALID_CREDENTIALS',message:'Invalid credentials'});}
       const user=auth.verify(req.headers.authorization?.replace(/^Bearer /,''));
       auditContext.userId=user?.sub??null;auditContext.deviceId=user?.deviceId??null;
       if(requireAuth&&!user)return send(401,{success:false,errorCode:'AUTHENTICATION_REQUIRED',message:'Authentication required'});
       const needs=permission=>{if(requireAuth&&!authorized(user,permission))throw new DomainError('FORBIDDEN','Insufficient permission',403);};
-      if(req.method==='POST'&&/^\/api\/auth\/sessions\/[^/]+\/revoke$/.test(u.pathname)){needs('session:revoke');const sessionId=u.pathname.split('/')[4];if(!auth.revokeSession(sessionId,user.sub))throw new DomainError('AUTH_SESSION_NOT_FOUND','Authentication session not found',404);await auth.flush();app.record('AUTH_SESSION_REVOKED',sessionId,{},null,user.deviceId,'SUCCESS');app.persist();return send(200,{success:true,data:{id:sessionId,status:'REVOKED'}});}
+      if(req.method==='POST'&&/^\/api\/auth\/sessions\/[^/]+\/revoke$/.test(u.pathname)){needs('session:revoke');const sessionId=u.pathname.split('/')[4];if(!auth.revokeSession(sessionId,user.sub))throw new DomainError('AUTH_SESSION_NOT_FOUND','Authentication session not found',404);await auth.flush();app.record('AUTH_SESSION_REVOKED',sessionId,{},null,user.deviceId,'SUCCESS');app.persist();await app.flush();return send(200,{success:true,data:{id:sessionId,status:'REVOKED'}});}
       if(req.method==='GET'&&u.pathname==='/api/tasks'){needs('inventory:read');return send(200,{items:app.state.tasks});}
       if(req.method==='GET'&&u.pathname==='/api/containers'){needs('inventory:read');return send(200,{items:app.state.containers});}
       if(req.method==='GET'&&u.pathname==='/api/configurations'){needs('inventory:read');return send(200,{items:app.state.configurationVersions});}
