@@ -22,7 +22,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
     const auditContext={requestId:String(req.headers['x-request-id']??randomUUID()),ipAddress:String(req.headers['x-forwarded-for']??req.socket.remoteAddress??'').split(',')[0].trim()||null,userId:null,deviceId:null};
     return app.withAuditContext(auditContext,async()=>{
     stats.requests++;
-    res.setHeader('Access-Control-Allow-Origin','*'); res.setHeader('Access-Control-Allow-Headers','Content-Type,Idempotency-Key,Authorization,X-Request-Id'); res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');res.setHeader('X-Request-Id',auditContext.requestId);
+    res.setHeader('Access-Control-Allow-Origin','*'); res.setHeader('Access-Control-Allow-Headers','Content-Type,Idempotency-Key,Authorization,X-Request-Id'); res.setHeader('Access-Control-Allow-Methods','GET,POST,DELETE,OPTIONS');res.setHeader('X-Request-Id',auditContext.requestId);
     if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
     const body=async()=>{let raw='';for await(const c of req)raw+=c;return raw?JSON.parse(raw):{};};
@@ -38,6 +38,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       const needs=permission=>{if(requireAuth&&!authorized(user,permission))throw new DomainError('FORBIDDEN','Insufficient permission',403);};
       if(req.method==='POST'&&/^\/api\/auth\/sessions\/[^/]+\/revoke$/.test(u.pathname)){needs('session:revoke');const sessionId=u.pathname.split('/')[4];if(!auth.revokeSession(sessionId,user.sub))throw new DomainError('AUTH_SESSION_NOT_FOUND','Authentication session not found',404);await auth.flush();app.record('AUTH_SESSION_REVOKED',sessionId,{},null,user.deviceId,'SUCCESS');app.persist();await app.flush();return send(200,{success:true,data:{id:sessionId,status:'REVOKED'}});}
       if(req.method==='GET'&&u.pathname==='/api/tasks/recommended'){needs('inventory:read');return send(200,{data:app.recommendedTask({operatorId:user.sub,roles:user.roles,skills:user.skills??[]})});}
+      if(req.method==='GET'&&u.pathname==='/api/skills'){needs('inventory:read');return send(200,{items:[...auth.skills.values()]});}
       if(req.method==='GET'&&u.pathname==='/api/devices'){needs('inventory:read');return send(200,{items:app.state.devices});}
       if(req.method==='GET'&&u.pathname==='/api/tasks'){needs('inventory:read');const assigned=u.searchParams.get('assignedTo'),items=assigned==='me'?app.state.tasks.filter(x=>x.assignedTo===user.sub):app.state.tasks;return send(200,{items});}
       if(req.method==='GET'&&u.pathname==='/api/exceptions'){needs('inventory:read');return send(200,{items:app.state.exceptions});}
@@ -59,6 +60,9 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&/^\/api\/shipments\/[^/]+\/manifest$/.test(u.pathname))return send(200,app.shipmentManifest(u.pathname.split('/')[3]));
       if(req.method==='GET'&&u.pathname.startsWith('/api/trace/')) return send(200,app.trace(u.pathname.split('/').at(-1)));
       if(req.method==='POST'&&u.pathname==='/api/sessions'){needs('operations:write');const b=await body();result=app.openSession(b.operatorId,b.deviceId,b.station);}
+      else if(req.method==='POST'&&u.pathname==='/api/skills'){needs('user-skills:write');result=await auth.createSkill(await body());app.record('SKILL_CREATED',result.id,{code:result.code});app.persist();}
+      else if(req.method==='POST'&&/^\/api\/users\/[^/]+\/skills$/.test(u.pathname)){needs('user-skills:write');const b=await body(),userId=u.pathname.split('/')[3];if(!await auth.assignSkill(userId,b.skillId))throw new DomainError('USER_OR_SKILL_NOT_FOUND','User or skill not found',404);result={userId,skillId:b.skillId,status:'ASSIGNED'};app.record('USER_SKILL_ASSIGNED',null,{userId,skillId:b.skillId});app.persist();}
+      else if(req.method==='DELETE'&&/^\/api\/users\/[^/]+\/skills\/[^/]+$/.test(u.pathname)){needs('user-skills:write');const parts=u.pathname.split('/'),userId=parts[3],skillId=parts[5];if(!await auth.revokeSkill(userId,skillId))throw new DomainError('USER_SKILL_NOT_FOUND','User skill assignment not found',404);result={userId,skillId,status:'REVOKED'};app.record('USER_SKILL_REVOKED',null,{userId,skillId});app.persist();}
       else if(req.method==='POST'&&u.pathname==='/api/devices'){needs('config:write');result=app.registerDevice(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/devices\/[^/]+\/heartbeat$/.test(u.pathname)){needs('operations:write');result=app.heartbeatDevice(u.pathname.split('/')[3]);}
       else if(req.method==='POST'&&/^\/api\/devices\/[^/]+\/retire$/.test(u.pathname)){needs('config:write');result=app.retireDevice(u.pathname.split('/')[3],key);}
