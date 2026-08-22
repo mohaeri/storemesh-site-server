@@ -72,7 +72,8 @@ export class StoreMesh {
   record(type, entityId, payload = {}, sessionId = null, explicitDeviceId = null, result='SUCCESS') {
     const context=this.auditContext.getStore()??{},session=sessionId?this.state.sessions.find(x=>x.id===sessionId):null,deviceId=explicitDeviceId??session?.deviceId??context.deviceId??'SYSTEM';
     const beforeState=payload.beforeState??null,afterState=payload.afterState??null,eventPayload={...payload};delete eventPayload.beforeState;delete eventPayload.afterState;
-    const event = { id: randomUUID(), site: this.site, type, entityId, sessionId:session?.id??sessionId, deviceId, userId:context.userId??session?.operatorId??null,requestId:context.requestId??randomUUID(),ipAddress:context.ipAddress??null,result,payload:eventPayload,beforeState,afterState,actorRoles:[...(context.roles??[])],actorStation:context.station??session?.station??null,occurredAt: this.clock(), schemaVersion:2 };
+    const requestId=context.requestId??randomUUID(),id=randomUUID();
+    const event = { id, site: this.site, type, entityId:entityId??id, sessionId:session?.id??sessionId, deviceId, userId:context.userId??session?.operatorId??null,requestId,ipAddress:context.ipAddress??null,result,payload:eventPayload,beforeState,afterState,actorRoles:[...(context.roles??[])],actorStation:context.station??session?.station??null,occurredAt: this.clock(), schemaVersion:2 };
     this.state.audit.push(event); this.state.outbox.push({ ...event, status: 'PENDING' }); return event;
   }
   openSession(operatorId, deviceId, station = 'terminal-01',selectedRole=null) {
