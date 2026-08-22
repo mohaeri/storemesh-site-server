@@ -35,17 +35,17 @@ export class StoreMesh {
     this.state.masterData??=Object.fromEntries([...REFERENCE_TYPES].map(type=>[type,seedDemoReferences?(DEMO_REFERENCES[type]??[]).map(code=>({id:randomUUID(),code,name:code,status:'ACTIVE'})):[]]));
     if(seedDemoReferences)for(const type of REFERENCE_TYPES)if(!this.state.masterData[type]?.length)this.state.masterData[type]=(DEMO_REFERENCES[type]??[]).map(code=>({id:randomUUID(),code,name:code,status:'ACTIVE'}));
     if(seedDemoReferences&&!this.state.devices.length)this.state.devices=DEMO_DEVICES.map(code=>({id:randomUUID(),code,type:code.includes('PDA')?'PDA':'TERMINAL',status:'ACTIVE',assignedStation:null,lastSeenAt:null,createdAt:this.clock()}));
-    this.lastDurableState=structuredClone(this.state);
+    this.lastDurableState=this.persistenceSnapshot(this.state);
   }
+  operationalSnapshot(source=this.state){const{audit:_audit,outbox:_outbox,...operational}=source;return structuredClone(operational)}
+  persistenceSnapshot(source=this.state){const snapshot=this.operationalSnapshot(source);snapshot.audit=(source.audit??[]).slice();snapshot.outbox=(source.outbox??[]).map(event=>({...event}));return snapshot}
   persist() {
     if (!this.repository) return;
     if (this.repository.isAsync) {
-      const snapshot = structuredClone({ ...this.state, idempotency: [...this.state.idempotency.entries()], idempotencyMeta:[...this.state.idempotencyMeta.entries()] });
-      snapshot.idempotency = new Map(snapshot.idempotency);
-      snapshot.idempotencyMeta = new Map(snapshot.idempotencyMeta);
-      const write=this.pendingPersistence.then(async()=>{await this.repository.save(snapshot);this.lastDurableState=structuredClone(snapshot)});
-      this.pendingPersistence=write.catch(error=>{this.state=structuredClone(this.lastDurableState);this.lastPersistenceError??=error;this.persistenceErrorLogger(error)});
-    } else {const snapshot=structuredClone(this.state);try{this.repository.save(this.state);this.lastDurableState=snapshot}catch(error){this.state=structuredClone(this.lastDurableState);throw error}}
+      const snapshot=this.persistenceSnapshot();
+      const write=this.pendingPersistence.then(async()=>{await this.repository.save(snapshot);this.lastDurableState=snapshot});
+      this.pendingPersistence=write.catch(error=>{this.state=this.persistenceSnapshot(this.lastDurableState);this.lastPersistenceError??=error;this.persistenceErrorLogger(error)});
+    } else {const snapshot=this.persistenceSnapshot();try{this.repository.save(snapshot);this.lastDurableState=snapshot}catch(error){this.state=this.persistenceSnapshot(this.lastDurableState);throw error}}
   }
   async flush() { await this.pendingPersistence;if(this.lastPersistenceError){const error=this.lastPersistenceError;this.lastPersistenceError=null;throw error} }
   withAuditContext(context,fn){return this.auditContext.run(context,fn)}
@@ -60,8 +60,8 @@ export class StoreMesh {
   raiseException(input,key){return this.run(key,'EXCEPTION_RAISED',()=>this.raiseExceptionRecord(input),input)}
   assignException(id,input,key){return this.run(key,'EXCEPTION_ASSIGNED',()=>{const item=this.state.exceptions.find(x=>x.id===id);if(!item)throw new DomainError('EXCEPTION_NOT_FOUND','Exception not found',404);if(!['OPEN','ASSIGNED'].includes(item.status)||!input.assignedTo)throw new DomainError('EXCEPTION_ASSIGNMENT_INVALID','Only open exceptions may be assigned',409);item.status='ASSIGNED';item.assignedTo=input.assignedTo;return item},{id,...input})}
   resolveException(id,input,key){return this.run(key,'EXCEPTION_RESOLVED',()=>{const item=this.state.exceptions.find(x=>x.id===id);if(!item)throw new DomainError('EXCEPTION_NOT_FOUND','Exception not found',404);if(!['OPEN','ASSIGNED'].includes(item.status)||!['RESOLVED','DISMISSED'].includes(input.decision)||!input.resolutionNote?.trim())throw new DomainError('EXCEPTION_RESOLUTION_INVALID','Resolution requires a decision and note',409);item.status=input.decision;item.resolvedBy=input.resolvedBy;item.resolutionNote=input.resolutionNote.trim();item.resolvedAt=this.clock();return item},{id,...input})}
-  restoreSnapshot(snapshot) {
-    for (const key of Object.keys(this.state)) if (!(key in snapshot)) delete this.state[key];
+  restoreSnapshot(snapshot,{preserve=[]}={}) {
+    const preserved=new Set(preserve);for (const key of Object.keys(this.state)) if (!(key in snapshot)&&!preserved.has(key)) delete this.state[key];
     for (const [key, saved] of Object.entries(snapshot)) {
       const current=this.state[key];
       if(Array.isArray(saved)&&Array.isArray(current)){
@@ -86,8 +86,8 @@ export class StoreMesh {
     const requestHash=createHash('sha256').update(JSON.stringify(request)).digest('hex'),existing=this.state.idempotencyMeta.get(key);
     if(existing&&existing.requestHash!==requestHash)throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH','Idempotency key was already used with a different payload',409);
     if (this.state.idempotency.has(key)) return this.state.idempotency.get(key);
-    const before=structuredClone(this.findEntity(request.id??request.batchId??request.entityId)),snapshot=structuredClone(this.state);
-    try{const result = fn(); this.state.idempotency.set(key, result);this.state.idempotencyMeta.set(key,{requestHash,createdAt:this.clock(),expiresAt:new Date(Date.parse(this.clock())+7*86400000).toISOString()}); this.record(action, result.id,{beforeState:before,afterState:structuredClone(this.findEntity(result.id)??result)},request.sessionId,null,'SUCCESS'); this.persist(); return result;}catch(error){const snapshotExceptionIds=new Set(snapshot.exceptions.map(x=>x.id)),raised=this.state.exceptions.filter(x=>!snapshotExceptionIds.has(x.id)).map(x=>structuredClone(x));this.restoreSnapshot(snapshot);this.state.exceptions.push(...raised);this.record(action,null,{errorCode:error.code??'SYSTEM',beforeState:before,afterState:null},request.sessionId,null,'FAILURE');this.persist();throw error}
+    const before=structuredClone(this.findEntity(request.id??request.batchId??request.entityId)),snapshot=this.operationalSnapshot(),auditLength=this.state.audit.length,outboxLength=this.state.outbox.length;
+    try{const result = fn(); this.state.idempotency.set(key, result);this.state.idempotencyMeta.set(key,{requestHash,createdAt:this.clock(),expiresAt:new Date(Date.parse(this.clock())+7*86400000).toISOString()}); this.record(action, result.id,{beforeState:before,afterState:structuredClone(this.findEntity(result.id)??result)},request.sessionId,null,'SUCCESS'); this.persist(); return result;}catch(error){const snapshotExceptionIds=new Set(snapshot.exceptions.map(x=>x.id)),raised=this.state.exceptions.filter(x=>!snapshotExceptionIds.has(x.id)).map(x=>structuredClone(x));this.state.audit.length=auditLength;this.state.outbox.length=outboxLength;this.restoreSnapshot(snapshot,{preserve:['audit','outbox']});this.state.exceptions.push(...raised);this.record(action,null,{errorCode:error.code??'SYSTEM',beforeState:before,afterState:null},request.sessionId,null,'FAILURE');this.persist();throw error}
   }
   findEntity(id){if(!id)return null;for(const value of Object.values(this.state))if(Array.isArray(value)){const found=value.find(x=>x?.id===id);if(found)return found}return null}
   record(type, entityId, payload = {}, sessionId = null, explicitDeviceId = null, result='SUCCESS') {

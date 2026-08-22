@@ -147,7 +147,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
 export async function createRuntimeServer() {
   const site = process.env.SITE_CODE || 'IRAN'; let repository; let initialState;
   if(process.env.NODE_ENV==='production'&&process.env.CLOUD_URL&&(!process.env.SITE_SYNC_KEY||['iran-dev-key','dubai-dev-key','rome-dev-key'].includes(process.env.SITE_SYNC_KEY)))throw new Error('SITE_SYNC_KEY must be a non-default secret in production');
-  if (process.env.DATABASE_URL) { repository = new PostgresRepository({ siteCode:site }); initialState = await repository.load(); }
+  if (process.env.DATABASE_URL) { repository = new PostgresRepository({ siteCode:site }); await repository.archiveHistory();initialState = await repository.load(); }
   else repository = process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null;
   const app = new StoreMesh({ site, repository: process.env.DATABASE_URL ? null : repository, initialState });
   if (process.env.DATABASE_URL) app.repository = repository;
