@@ -43,7 +43,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&u.pathname==='/api/roles'){needs('inventory:read');return send(200,{items:[...auth.roles.values()]});}
       if(req.method==='GET'&&u.pathname==='/api/users'){needs('roles:write');return send(200,{items:auth.publicUsers()});}
       if(req.method==='GET'&&u.pathname==='/api/devices'){needs('inventory:read');return send(200,{items:app.devicesWithPresence()});}
-      if(req.method==='GET'&&u.pathname==='/api/tasks'){needs('inventory:read');const assigned=u.searchParams.get('assignedTo'),items=assigned==='me'?app.state.tasks.filter(x=>x.assignedTo===user.sub):app.state.tasks;return send(200,{items});}
+      if(req.method==='GET'&&u.pathname==='/api/tasks'){needs('inventory:read');const assigned=u.searchParams.get('assignedTo'),eligible=u.searchParams.get('eligible'),items=assigned==='me'?app.state.tasks.filter(x=>x.assignedTo===user.sub):eligible==='me'?app.state.tasks.filter(x=>['OPEN','IN_PROGRESS','PAUSED'].includes(x.status)&&app.taskEligible(x,{operatorId:user.sub,roles:user.roles,skills:user.skills??[]})):app.state.tasks;return send(200,{items});}
       if(req.method==='GET'&&u.pathname==='/api/exceptions'){needs('inventory:read');return send(200,{items:app.state.exceptions});}
       if(req.method==='GET'&&u.pathname==='/api/deliveries'){needs('inventory:read');const items=app.state.deliveries.map(x=>({...x,baskets:app.state.deliveryBaskets.filter(b=>b.deliveryId===x.id)}));return send(200,{items});}
       if(req.method==='GET'&&u.pathname==='/api/harvest-periods'){needs('inventory:read');return send(200,{items:app.state.harvestPeriods});}
@@ -58,6 +58,9 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&u.pathname==='/api/packages'){needs('inventory:read');return send(200,{items:app.state.packages});}
       if(req.method==='GET'&&u.pathname==='/api/cycles'){needs('inventory:read');return send(200,{items:app.state.cycles});}
       if(req.method==='GET'&&u.pathname==='/api/shipments'){needs('inventory:read');return send(200,{items:app.state.shipments});}
+      if(req.method==='GET'&&u.pathname==='/api/customers'){needs('inventory:read');return send(200,{items:app.state.customers});}
+      if(req.method==='GET'&&u.pathname==='/api/sales-orders'){needs('inventory:read');return send(200,{items:app.state.salesOrders});}
+      if(req.method==='GET'&&u.pathname==='/api/shipment-carton-scans'){needs('inventory:read');return send(200,{items:app.state.shipmentCartonScans});}
       if(req.method==='GET'&&u.pathname==='/api/quality-checks'){needs('inventory:read');return send(200,{items:app.state.qualityChecks});}
       if(req.method==='GET'&&u.pathname==='/api/qc-checklists'){needs('inventory:read');return send(200,{items:app.state.qcChecklists});}
       if(req.method==='GET'&&u.pathname==='/api/reports/operations'){needs('inventory:read');return send(200,{data:app.reports()});}
@@ -66,6 +69,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&u.pathname==='/api/internal-transfers'){needs('inventory:read');return send(200,{items:app.state.internalTransfers});}
       if(req.method==='GET'&&/^\/api\/shipments\/[^/]+\/manifest$/.test(u.pathname))return send(200,app.shipmentManifest(u.pathname.split('/')[3]));
       if(req.method==='GET'&&u.pathname.startsWith('/api/trace/')) return send(200,app.trace(u.pathname.split('/').at(-1)));
+      if(req.method==='POST'&&u.pathname==='/api/packaging/sessions'){needs('packaging:write');const b=await body();if(!user.roles?.includes('PACKAGING_OPERATOR')&&!user.roles?.includes('ADMIN'))throw new DomainError('PACKAGING_ROLE_REQUIRED','Packaging role is required',403);result=app.openSession(user.sub,b.deviceId,b.station??'PACKAGING','PACKAGING_OPERATOR');await app.flush();return send(201,{success:true,data:result});}
       if(req.method==='POST'&&u.pathname==='/api/sessions'){needs('operations:write');const b=await body();if(b.selectedRole&&!user.roles?.includes(b.selectedRole)&&!user.roles?.includes('ADMIN'))throw new DomainError('SESSION_ROLE_NOT_ASSIGNED','Selected role is not assigned to this user',403);result=app.openSession(b.operatorId,b.deviceId,b.station,b.selectedRole??null);}
       else if(req.method==='POST'&&u.pathname==='/api/skills'){needs('user-skills:write');result=await auth.createSkill(await body());app.record('SKILL_CREATED',result.id,{code:result.code});app.persist();}
       else if(req.method==='POST'&&u.pathname==='/api/roles'){needs('roles:write');result=await auth.createRole(await body());app.record('ROLE_CREATED',result.id,{afterState:result});app.persist();}
@@ -92,19 +96,27 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/deliveries\/[^/]+\/complete$/.test(u.pathname)){needs('receiving:write');result=app.completeDelivery(u.pathname.split('/')[3],await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/movements'){needs('storage:write');const b=await body();result=app.move(b.batchId,b.zone,b.sessionId,key,b.overrideId);}
       else if(req.method==='POST'&&u.pathname==='/api/containers'){needs('storage:write');result=app.createContainer(await body(),key);}
-      else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/update$/.test(u.pathname)){needs('storage:write');result=app.updateContainer(u.pathname.split('/')[3],await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/update$/.test(u.pathname)){const b=await body();needs(b.designatedZone!==undefined?'container:designate':'storage:write');result=app.updateContainer(u.pathname.split('/')[3],b,key);}
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/assign$/.test(u.pathname)){needs('storage:write');const b=await body();result=app.assignBatchToContainer(u.pathname.split('/')[3],b.batchId,b.sessionId,key);}
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/move$/.test(u.pathname)){needs('storage:write');const b=await body();result=app.moveContainer(u.pathname.split('/')[3],b.zone,b.sessionId,key);}
       else if(req.method==='POST'&&u.pathname==='/api/transforms'){const b=await body();needs({WASH:'washing:write',SLICE:'slicing:write',MERGE:'operations:write'}[b.process]??'operations:write');result=app.transform(b,key);}
       else if(req.method==='POST'&&u.pathname==='/api/cycles'){const b=await body();needs(b.type==='FREEZE'?'freezing:write':'drying:write');result=app.createCycle(b,key);}
       else if(req.method==='POST'&&/^\/api\/cycles\/[^/]+\/(start|pause|resume|complete|finish|fail|cancel)$/.test(u.pathname)){const parts=u.pathname.split('/'),cycle=app.state.cycles.find(x=>x.id===parts[3]);needs(cycle?.type==='FREEZE'?'freezing:write':'drying:write');result=app.transitionCycle(parts[3],parts[4].toUpperCase(),await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/sorting'){needs('sorting:write');result=app.sortBatch(await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/batches\/[^/]+\/destination$/.test(u.pathname)){needs('sorting:destination');result=app.assignSortingDestination(u.pathname.split('/')[3],(await body()).destination,key);}
       else if(req.method==='POST'&&u.pathname==='/api/packages'){needs('packaging:write');const b=await body();app.reference('packageTypes',b.type);result=app.createPackage(b,key);}
+      else if(req.method==='POST'&&u.pathname==='/api/packaging/weigh'){needs('packaging:write');result=app.weighForPackaging(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/packages\/[^/]+\/scans$/.test(u.pathname)){needs('packaging:write');result=app.scanPackageItem(u.pathname.split('/')[3],await body(),key);}
       else if(req.method==='POST'&&/^\/api\/packages\/[^/]+\/(pack|seal|print|print_success|print_fail|retry|ready|ship|cancel|damage)$/.test(u.pathname)){needs('packaging:write');const parts=u.pathname.split('/'),b=['cancel','damage'].includes(parts[4])?await body():{};result=app.transitionPackage(parts[3],parts[4].toUpperCase(),key,b);}
+      else if(req.method==='POST'&&u.pathname==='/api/customers'){needs('shipping:write');result=app.createCustomer(await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/customers\/[^/]+\/update$/.test(u.pathname)){needs('shipping:write');result=app.updateCustomer(u.pathname.split('/')[3],await body(),key);}
+      else if(req.method==='POST'&&u.pathname==='/api/sales-orders'){needs('shipping:write');result=app.createSalesOrder(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/shipments'){needs('shipping:write');result=app.createShipment(await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/shipments\/[^/]+\/scans$/.test(u.pathname)){needs('shipping:write');result=app.scanShipmentCarton(u.pathname.split('/')[3],await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/shipments\/[^/]+\/(start_picking|ready|load|ship|close|cancel)$/.test(u.pathname)){needs('shipping:write');const parts=u.pathname.split('/');result=app.updateShipment(parts[3],parts[4].toUpperCase(),await body(),key);}
+      else if(req.method==='POST'&&u.pathname==='/api/internal-shipments'){needs('shipping:write');result=app.createInternalShipment(await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/internal-shipments\/[^/]+\/(load|dispatch|deliver|cancel)$/.test(u.pathname)){needs('shipping:write');const parts=u.pathname.split('/');result=app.updateInternalShipment(parts[3],parts[4].toUpperCase(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/internal-transfers/receive'){needs('operations:write');result=app.receiveInternalTransfer(await body(),key);}
-      else if(req.method==='POST'&&/^\/api\/shipments\/[^/]+\/(load|dispatch|deliver|cancel)$/.test(u.pathname)){needs('shipping:write');const parts=u.pathname.split('/');result=app.updateShipment(parts[3],parts[4].toUpperCase(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/tasks'){needs('operations:write');result=app.createTask(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/exceptions'){needs('operations:write');result=app.raiseException(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/exceptions\/[^/]+\/assign$/.test(u.pathname)){needs('operations:write');result=app.assignException(u.pathname.split('/')[3],await body(),key);}
