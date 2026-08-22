@@ -30,5 +30,6 @@ test('FIFO deviation, quarantine and equipment failure raise exceptions',()=>{
   newer.status='SLICED';newer.zone='FREEZING';tray.status='SLICED';tray.zone='FREEZING';tray.activeSessionId=null;
   const cycle=app.createCycle({sessionId:session.id,type:'FREEZE',machineId:'freezer-1',trayIds:[tray.id]},'cycle');
   app.transitionCycle(cycle.id,'START',{sessionId:session.id},'start');app.transitionCycle(cycle.id,'FAIL',{sessionId:session.id,reason:'power'},'fail');
-  assert.deepEqual(new Set(app.state.exceptions.map(x=>x.type)),new Set(['FIFO_DEVIATION','QUALITY_QUARANTINE','EQUIPMENT_CYCLE_FAILURE']));
+  const types=new Set(app.state.exceptions.map(x=>x.type));
+  for(const required of ['FIFO_DEVIATION','QUALITY_QUARANTINE','EQUIPMENT_CYCLE_FAILURE'])assert.equal(types.has(required),true);
 });

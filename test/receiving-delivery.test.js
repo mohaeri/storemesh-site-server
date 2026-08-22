@@ -1,0 +1,20 @@
+import test from'node:test';
+import assert from'node:assert/strict';
+import{StoreMesh}from'../src/domain.js';
+import{AuthService}from'../src/auth.js';
+
+test('one delivery accepts repeated scanned baskets then creates one aggregate batch and cold-storage task',()=>{
+  const app=new StoreMesh({clock:()=> '2026-06-24T10:00:00.000Z'}),session=app.openSession('receiver','TEST-DEVICE');
+  app.createHarvestPeriod({code:'2026-W27',label:'هفته اول تیر',startDate:'2026-06-22',endDate:'2026-06-28'},'period');
+  const delivery=app.startDelivery({supplierCode:'S',sessionId:session.id},'delivery'),containers=[app.createContainer({capacityKg:20},'c1'),app.createContainer({capacityKg:20},'c2')];
+  const baskets=containers.map((container,i)=>app.receive({deliveryId:delivery.id,sessionId:session.id,containerId:container.id,supplier:'S',product:'T',grade:'A',size:'L',weightKg:5+i},`receive-${i}`));
+  assert.deepEqual(baskets.map(x=>x.harvestPeriod),['2026-W27','2026-W27']);
+  assert.equal(app.state.printJobs.filter(x=>x.entityType==='BATCH').length,0);
+  const completed=app.completeDelivery(delivery.id,{sessionId:session.id},'complete');
+  assert.equal(completed.baskets.length,2);assert.equal(completed.receivingBatch.weightKg,11);assert.equal(completed.receivingBatch.isAggregate,true);assert.deepEqual(completed.receivingBatch.parentIds,baskets.map(x=>x.id));assert.equal(completed.task.zone,'COLD_ROOM');assert.equal(completed.task.entityId,completed.receivingBatch.id);
+  assert.throws(()=>app.completeDelivery(delivery.id,{sessionId:session.id},'again'),e=>e.code==='DELIVERY_NOT_OPEN');
+});
+
+test('harvest period is server-derived and client-supplied values are ignored',()=>{const app=new StoreMesh({clock:()=> '2026-06-24T10:00:00.000Z'}),session=app.openSession('receiver','TEST-DEVICE'),container=app.createContainer({capacityKg:20},'container');app.createHarvestPeriod({code:'REAL',label:'Configured',startDate:'2026-06-01',endDate:'2026-06-30'},'period');const batch=app.receive({sessionId:session.id,containerId:container.id,supplier:'S',product:'T',grade:'A',size:'L',weightKg:5,harvestPeriod:'FAKE-CLIENT'},'receive');assert.equal(batch.harvestPeriod,'REAL')});
+
+test('badge regeneration invalidates the old badge and issues a normal role-bearing JWT',async()=>{const auth=new AuthService({secret:'badge-test',site:'IRAN'});auth.addUser({id:'operator-id',username:'operator',password:'password',roles:['RECEIVING_OPERATOR']});const first=auth.assignBadge('operator-id'),token=auth.loginBadge(first.badgeCode,'TEST-DEVICE');assert.ok(token);assert.deepEqual(auth.verify(token).roles,['RECEIVING_OPERATOR']);const second=auth.assignBadge('operator-id');assert.equal(auth.loginBadge(first.badgeCode,'TEST-DEVICE'),null);assert.ok(auth.loginBadge(second.badgeCode,'TEST-DEVICE'));await auth.flush()});
