@@ -41,6 +41,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&u.pathname==='/api/tasks/recommended'){needs('inventory:read');return send(200,{data:app.recommendedTask({operatorId:user.sub,roles:user.roles,skills:user.skills??[]})});}
       if(req.method==='GET'&&u.pathname==='/api/skills'){needs('inventory:read');return send(200,{items:[...auth.skills.values()]});}
       if(req.method==='GET'&&u.pathname==='/api/roles'){needs('inventory:read');return send(200,{items:[...auth.roles.values()]});}
+      if(req.method==='GET'&&u.pathname==='/api/users'){needs('roles:write');return send(200,{items:auth.publicUsers()});}
       if(req.method==='GET'&&u.pathname==='/api/devices'){needs('inventory:read');return send(200,{items:app.devicesWithPresence()});}
       if(req.method==='GET'&&u.pathname==='/api/tasks'){needs('inventory:read');const assigned=u.searchParams.get('assignedTo'),items=assigned==='me'?app.state.tasks.filter(x=>x.assignedTo===user.sub):app.state.tasks;return send(200,{items});}
       if(req.method==='GET'&&u.pathname==='/api/exceptions'){needs('inventory:read');return send(200,{items:app.state.exceptions});}
