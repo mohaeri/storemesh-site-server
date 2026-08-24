@@ -5,6 +5,8 @@ import { StoreMesh } from '../src/domain.js';
 let sequence=0;const key=label=>`${label}-${++sequence}`;
 const setup=()=>{const app=new StoreMesh({clock:()=> '2026-08-24T09:00:00.000Z'}),session=app.openSession('operator','TEST-DEVICE','RECEIVING','STORAGE_OPERATOR');return{app,session}};
 
+test('fresh sites seed only the split cold-room zones',()=>{const app=new StoreMesh();const zones=app.state.masterData.zones;assert.equal(zones.some(x=>x.code==='COLD_ROOM'),false);assert.equal(zones.find(x=>x.code==='COLD_ROOM_CLEAN')?.status,'ACTIVE');assert.equal(zones.find(x=>x.code==='COLD_ROOM_DIRTY')?.status,'ACTIVE')});
+
 test('container label is optional and requested only by an explicit action',()=>{const{app}=setup(),container=app.createContainer({capacityKg:20},key('container'));assert.equal(app.state.printJobs.some(x=>x.entityId===container.id),false);const requested=app.requestContainerLabel(container.id,key('label'));assert.equal(requested.printJob.entityId,container.id);assert.equal(requested.container.labelRequested,true)});
 
 test('reusable tare derives net while single-use records gross directly',()=>{const{app,session}=setup(),basket=app.createContainer({capacityKg:20,tareWeightKg:2},key('basket')),net=app.receive({sessionId:session.id,containerId:basket.id,supplier:'S',product:'T',grade:'A',size:'L',grossWeightKg:12},key('net'));assert.equal(net.weightKg,10);assert.equal(net.tareWeightKg,2);const single=app.createContainer({type:'SINGLE_USE',singleUse:true,capacityKg:20,tareWeightKg:9},key('single')),gross=app.receive({sessionId:session.id,containerId:single.id,supplier:'S',product:'T',grade:'A',size:'L',grossWeightKg:12},key('gross'));assert.equal(gross.weightKg,12);assert.equal(single.tareWeightKg,null)});
