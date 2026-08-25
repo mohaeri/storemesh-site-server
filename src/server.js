@@ -9,6 +9,16 @@ import { OutboxPublisher } from './outbox-publisher.js';
 import { errorResponse } from './errors.js';
 export const BOOTSTRAP_ADMIN_ID='00000000-0000-4000-a000-000000000001',BOOTSTRAP_OPERATOR_ID='00000000-0000-4000-a000-000000000002';
 
+const receivingContainerInput=input=>{
+  const allowedFields=new Set(['type','capacityKg','tareWeightKg','zone','designatedZones']);
+  if(Object.keys(input).some(field=>!allowedFields.has(field)))throw new DomainError('BASIC_CONTAINER_FIELDS_FORBIDDEN','Receiving operators may only set basic reusable-container fields',403);
+  const type=String(input.type??'BASKET').toUpperCase(),zone=String(input.zone??'RECEIVING').toUpperCase(),designatedZones=input.designatedZones??['RECEIVING','COLD_ROOM_DIRTY'];
+  if(!['BASKET','CRATE'].includes(type))throw new DomainError('BASIC_CONTAINER_TYPE_FORBIDDEN','Receiving operators may only create reusable BASKET or CRATE containers',403);
+  if(zone!=='RECEIVING')throw new DomainError('BASIC_CONTAINER_ZONE_FORBIDDEN','Receiving operators may only create containers in RECEIVING',403);
+  if(!Array.isArray(designatedZones)||!designatedZones.length||designatedZones.some(code=>!['RECEIVING','COLD_ROOM_DIRTY'].includes(String(code).toUpperCase())))throw new DomainError('BASIC_CONTAINER_DESIGNATION_FORBIDDEN','Receiving containers may only be designated for RECEIVING and COLD_ROOM_DIRTY',403);
+  return{type,capacityKg:input.capacityKg,tareWeightKg:input.tareWeightKg,zone,designatedZones:[...new Set(designatedZones.map(code=>String(code).toUpperCase()))]};
+};
+
 export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN', repository: process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null }), auth = null, requireAuth = true } = {}) {
   auth ??= new AuthService({ site: app.site });
   if (!auth.users.size) {
@@ -100,7 +110,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/deliveries\/[^/]+\/complete$/.test(u.pathname)){needs('receiving:write');result=app.completeDelivery(u.pathname.split('/')[3],await body(),key);}
       else if(req.method==='POST'&&/^\/api\/deliveries\/[^/]+\/move-to-cold-storage$/.test(u.pathname)){needs('storage:write');result=app.moveDeliveryContainers(u.pathname.split('/')[3],await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/movements'){needs('storage:write');const b=await body();result=app.move(b.batchId,b.zone,b.sessionId,key,b.overrideId);}
-      else if(req.method==='POST'&&u.pathname==='/api/containers'){needs('storage:write');result=app.createContainer(await body(),key);}
+      else if(req.method==='POST'&&u.pathname==='/api/containers'){const b=await body();if(!requireAuth||authorized(user,'storage:write'))result=app.createContainer(b,key);else{needs('containers:create-basic');result=app.createContainer(receivingContainerInput(b),key);}}
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/label$/.test(u.pathname)){needs('print:write');result=app.requestContainerLabel(u.pathname.split('/')[3],key);}
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/update$/.test(u.pathname)){const b=await body();needs(b.designatedZone!==undefined?'container:designate':'storage:write');result=app.updateContainer(u.pathname.split('/')[3],b,key);}
       else if(req.method==='POST'&&/^\/api\/containers\/[^/]+\/assign$/.test(u.pathname)){needs('storage:write');const b=await body();result=app.assignBatchToContainer(u.pathname.split('/')[3],b.batchId,b.sessionId,key);}
@@ -125,17 +135,17 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/shipments\/[^/]+\/scans$/.test(u.pathname)){needs('shipping:write');result=app.scanShipmentCarton(u.pathname.split('/')[3],await body(),key);}
       else if(req.method==='POST'&&/^\/api\/shipments\/[^/]+\/(start_picking|ready|load|ship|close|cancel)$/.test(u.pathname)){needs('shipping:write');const parts=u.pathname.split('/');result=app.updateShipment(parts[3],parts[4].toUpperCase(),await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/internal-shipments'){needs('shipping:write');result=app.createInternalShipment(await body(),key);}
-      else if(req.method==='POST'&&/^\/api\/internal-shipments\/[^/]+\/(load|dispatch|deliver|cancel)$/.test(u.pathname)){needs('shipping:write');const parts=u.pathname.split('/');result=app.updateInternalShipment(parts[3],parts[4].toUpperCase(),key);}
-      else if(req.method==='POST'&&u.pathname==='/api/internal-transfers/receive'){needs('operations:write');result=app.receiveInternalTransfer(await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/internal-shipments\/[^/]+\/(load|dispatch|deliver|cancel)$/.test(u.pathname)){needs('shipping:write');const parts=u.pathname.split('/');result=app.updateInternalShipment(parts[3],parts[4].toUpperCase(),await body(),key);}
+      else if(req.method==='POST'&&u.pathname==='/api/internal-transfers/receive'){needs('operations:write');const b=await body();result=app.receiveInternalTransfer({...b,receivedBy:user?.sub??null},key);}
       else if(req.method==='POST'&&u.pathname==='/api/tasks'){needs('operations:write');result=app.createTask(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/exceptions'){needs('operations:write');result=app.raiseException(await body(),key);}
       else if(req.method==='POST'&&/^\/api\/exceptions\/[^/]+\/assign$/.test(u.pathname)){needs('operations:write');result=app.assignException(u.pathname.split('/')[3],await body(),key);}
       else if(req.method==='POST'&&/^\/api\/exceptions\/[^/]+\/resolve$/.test(u.pathname)){needs('override:approve');const b=await body();result=app.resolveException(u.pathname.split('/')[3],{...b,resolvedBy:user.sub},key);}
       else if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/claim$/.test(u.pathname)){needs('operations:write');result=app.claimTask(u.pathname.split('/')[3],{operatorId:user.sub,roles:user.roles,skills:user.skills??[]},key);}
       else if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/(complete|pause|fail|resume|reopen)$/.test(u.pathname)){needs('operations:write');const parts=u.pathname.split('/'),b=await body();result=app.transitionTask(parts[3],parts[4].toUpperCase(),{...b,actor:{operatorId:user.sub,roles:user.roles,skills:user.skills??[]}},key);}
-      else if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/reassign$/.test(u.pathname)){needs('override:approve');const b=await body(),target=auth.userById(b.operatorId);if(!target)throw new DomainError('USER_NOT_FOUND','Target operator not found',404);result=app.reassignTask(u.pathname.split('/')[3],{operatorId:target.id,roles:target.roles,skills:target.skills??[]},key);}
+      else if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/reassign$/.test(u.pathname)){needs('override:approve');const b=await body(),target=auth.userById(b.operatorId);if(!target)throw new DomainError('USER_NOT_FOUND','Target operator not found',404);result=app.reassignTask(u.pathname.split('/')[3],{operatorId:target.id,roles:target.roles,skills:target.skills??[],reason:b.reason},key);}
       else if(req.method==='POST'&&u.pathname==='/api/qc-checklists'){needs('config:write');result=app.createQcChecklist(await body(),key);}
-      else if(req.method==='POST'&&u.pathname==='/api/quality-checks'){needs('quality:approve');const b=await body();result=app.qualityCheck({...b,inspectorId:user.sub,attestation:{...(b.attestation??{}),userId:user.sub}},key);}
+      else if(req.method==='POST'&&u.pathname==='/api/quality-checks'){needs('quality:approve');const b=await body();result=app.qualityCheck({...b,inspectorId:user.sub,actorRoles:[...(user.roles??[])],attestation:{...(b.attestation??{}),userId:user.sub}},key);}
       else if(req.method==='POST'&&u.pathname==='/api/quality-checks/release'){needs('quality:approve');const b=await body();result=app.releaseQuarantine({...b,inspectorId:user.sub},key);}
       else if(req.method==='POST'&&u.pathname==='/api/inventory-adjustments'){needs('inventory:adjust.approve');result=app.adjustInventory(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/configurations'){needs('config:write');const b=await body();result=app.createConfiguration({...b,userId:user.sub},key);}
@@ -156,6 +166,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
 export async function createRuntimeServer() {
   const site = process.env.SITE_CODE || 'IRAN'; let repository; let initialState;
   if(process.env.NODE_ENV==='production'&&process.env.CLOUD_URL&&(!process.env.SITE_SYNC_KEY||['iran-dev-key','dubai-dev-key','rome-dev-key'].includes(process.env.SITE_SYNC_KEY)))throw new Error('SITE_SYNC_KEY must be a non-default secret in production');
+  if(process.env.NODE_ENV==='production'&&(!process.env.TRANSFER_MANIFEST_KEY||process.env.TRANSFER_MANIFEST_KEY.length<32))throw new Error('TRANSFER_MANIFEST_KEY must be a secret of at least 32 characters in production');
   if (process.env.DATABASE_URL) { repository = new PostgresRepository({ siteCode:site }); await repository.archiveHistory();initialState = await repository.load(); }
   else repository = process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null;
   const app = new StoreMesh({ site, repository: process.env.DATABASE_URL ? null : repository, initialState });
