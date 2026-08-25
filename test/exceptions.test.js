@@ -24,8 +24,8 @@ test('FIFO deviation, quarantine and equipment failure raise exceptions',()=>{
   const receive=(key)=>{const c=app.createContainer({capacityKg:10},`c-${key}`);return app.receive({sessionId:session.id,containerId:c.id,supplier:'S',product:'T',grade:'A',size:'L',weightKg:2},key)};
   const oldest=receive('old'),newer=receive('new');app.move(oldest.id,'COLD_ROOM_CLEAN',session.id,'move-old');app.move(newer.id,'COLD_ROOM_CLEAN',session.id,'move-new');
   app.move(newer.id,'SORTING',session.id,'fifo');
-  const checklist=app.createQcChecklist({code:'QC-T',product:oldest.product,stage:'QC',name:'QC',items:[{code:'VISUAL',prompt:'Visual pass'}]},'checklist');
-  app.qualityCheck({batchId:oldest.id,stage:'QC',checklistId:checklist.id,responses:[{itemCode:'VISUAL',value:false}],attestation:{confirmed:true,role:'QUALITY_OPERATOR'},result:'QUARANTINED',inspectorId:'qc'},'qc');
+  const checklist=app.createQcChecklist({code:'QC-T',product:oldest.product,stage:'RECEIVING',name:'QC',items:[{code:'VISUAL',prompt:'Visual pass'}]},'checklist');
+  app.qualityCheck({batchId:oldest.id,stage:'RECEIVING',checklistId:checklist.id,responses:[{itemCode:'VISUAL',value:false}],attestation:{confirmed:true,role:'QUALITY_OPERATOR'},actorRoles:['QUALITY_OPERATOR'],result:'QUARANTINED',inspectorId:'qc'},'qc');
   const tray=app.createContainer({type:'TRAY',capacityKg:10},'tray');app.assignBatchToContainer(tray.id,newer.id,session.id,'tray-assign');
   newer.status='SLICED';newer.zone='FREEZING';tray.status='SLICED';tray.zone='FREEZING';tray.activeSessionId=null;
   const cycle=app.createCycle({sessionId:session.id,type:'FREEZE',machineId:'freezer-1',trayIds:[tray.id]},'cycle');
