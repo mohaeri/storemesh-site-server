@@ -11,7 +11,8 @@ test('one delivery accepts repeated scanned baskets then creates one aggregate b
   assert.deepEqual(baskets.map(x=>x.harvestPeriod),['2026-W26','2026-W26']);
   assert.equal(app.state.printJobs.filter(x=>x.entityType==='BATCH').length,0);
   const completed=app.completeDelivery(delivery.id,{sessionId:session.id},'complete');
-  assert.equal(completed.baskets.length,2);assert.equal(completed.receivingBatch.weightKg,11);assert.equal(completed.receivingBatch.isAggregate,true);assert.deepEqual(completed.receivingBatch.parentIds,baskets.map(x=>x.id));assert.equal(completed.task.zone,'COLD_ROOM_DIRTY');assert.equal(completed.task.entityId,completed.receivingBatch.id);assert.deepEqual(completed.delivery.containerIds,containers.map(x=>x.id));
+  assert.equal(completed.baskets.length,2);assert.equal(completed.receivingBatch.weightKg,11);assert.equal(completed.receivingBatch.isAggregate,true);assert.deepEqual(completed.receivingBatch.parentIds,baskets.map(x=>x.id));assert.equal(completed.task.zone,'COLD_ROOM_DIRTY');assert.equal(completed.task.entityId,completed.receivingBatch.id);assert.equal(completed.task.operationType,'DELIVERY_CONTAINERS_MOVED');assert.deepEqual(completed.delivery.containerIds,containers.map(x=>x.id));
+  app.claimTask(completed.task.id,{operatorId:'receiver',roles:['STORAGE_OPERATOR'],skills:[]},'claim-cold-task');assert.throws(()=>app.transitionTask(completed.task.id,'COMPLETE',{},'fake-cold-complete'),e=>e.code==='TASK_MANUAL_COMPLETION_FORBIDDEN');app.moveDeliveryContainers(delivery.id,{sessionId:session.id},'move-cold');assert.equal(app.task(completed.task.id).status,'COMPLETED');
   assert.throws(()=>app.completeDelivery(delivery.id,{sessionId:session.id},'again'),e=>e.code==='DELIVERY_NOT_OPEN');
 });
 
