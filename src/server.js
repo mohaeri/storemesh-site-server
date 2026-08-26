@@ -157,7 +157,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/claim$/.test(u.pathname)){needs('print:write');const b=await body();result=app.claimPrint(u.pathname.split('/')[3],b.sessionId);}
       else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/complete$/.test(u.pathname)){needs('print:write');const b=await body();result=app.completePrint(u.pathname.split('/')[3],b.sessionId);}
       else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/fail$/.test(u.pathname)){needs('print:write');const b=await body();result=app.failPrint(u.pathname.split('/')[3],b.reason,b.sessionId);}
-      else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/retry$/.test(u.pathname)){needs('print:write');const b=await body();result=app.retryPrint(u.pathname.split('/')[3],b.verifiedScan,b.sessionId);}
+      else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/retry$/.test(u.pathname)){needs('print:write');const b=await body();result=app.retryPrint(u.pathname.split('/')[3],b.verifiedScan,b.sessionId,b.reason);}
       else return send(404,{success:false,errorCode:'NOT_FOUND',message:'Route not found'});
       await app.flush(); send(201,{success:true,data:result});
     } catch(e){stats.errors++;app.record('REQUEST_FAILED',null,{method:req.method,path:req.url,errorCode:e.code??'SYSTEM'},null,auditContext.deviceId,'FAILURE');app.persist();const failure=errorResponse(e);if(failure.status>=500)console.error(JSON.stringify({level:'error',site:app.site,errorCode:e.code??'SYSTEM',message:e.message,at:new Date().toISOString()}));send(failure.status,failure.body);}
