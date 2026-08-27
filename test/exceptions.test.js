@@ -21,7 +21,7 @@ test('capacity rejection raises a durable operational exception',()=>{
 
 test('FIFO deviation, quarantine and equipment failure raise exceptions',()=>{
   let tick=0;const app=new StoreMesh({clock:()=>new Date(1700000000000+tick++*1000).toISOString()}),session=app.openSession('operator','device-1');
-  const receive=(key)=>{const c=app.createContainer({capacityKg:10},`c-${key}`);return app.receive({sessionId:session.id,containerId:c.id,supplier:'S',product:'T',grade:'A',size:'L',weightKg:2},key)};
+  const receive=(key)=>{const c=app.createContainer({capacityKg:10},`c-${key}`);const b=app.receive({sessionId:session.id,containerId:c.id,supplier:'S',product:'T',grade:'A',size:'L',weightKg:2},key);c.batchIds=[];b.containerId=null;return b};
   const oldest=receive('old'),newer=receive('new');app.move(oldest.id,'COLD_ROOM_CLEAN',session.id,'move-old');app.move(newer.id,'COLD_ROOM_CLEAN',session.id,'move-new');
   app.move(newer.id,'SORTING',session.id,'fifo');
   const checklist=app.createQcChecklist({code:'QC-T',product:oldest.product,stage:'RECEIVING',name:'QC',items:[{code:'VISUAL',prompt:'Visual pass'}]},'checklist');
