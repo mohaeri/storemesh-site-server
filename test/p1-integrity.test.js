@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {StoreMesh} from '../src/domain.js';
 
-const setup=(role=null)=>{const app=new StoreMesh(),session=app.openSession('operator','TEST-DEVICE','station',role),container=app.createContainer({capacityKg:100},'container'),batch=app.receive({sessionId:session.id,containerId:container.id,supplier:'S',product:'T',grade:'UNSORTED',size:'MIXED',weightKg:10},'receive');return{app,session,container,batch}};
+const setup=(role=null)=>{const app=new StoreMesh();app.state.consumables.push({id:crypto.randomUUID(),code:'CARTON',name:'Carton',unit:'EA',quantity:10,reorderThreshold:0,status:'ACTIVE',createdAt:new Date().toISOString()});const session=app.openSession('operator','TEST-DEVICE','station',role),container=app.createContainer({capacityKg:100},'container'),batch=app.receive({sessionId:session.id,containerId:container.id,supplier:'S',product:'T',grade:'UNSORTED',size:'MIXED',weightKg:10},'receive');return{app,session,container,batch}};
 const errorCode=code=>error=>error.code===code;
 
 test('quarantined inventory is rejected by every production, packaging, and shipment gate',()=>{
