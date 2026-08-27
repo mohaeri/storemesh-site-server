@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {StoreMesh} from '../src/domain.js';
+import {PostgresRepository} from '../src/postgres-repository.js';
+
+const key=()=>randomUUID();
+function setup(app=new StoreMesh()){
+  const session=app.openSession('fresh','TEST-DEVICE','FRESH_EXPORT','FRESH_EXPORT_OPERATOR');
+  for(const [code,quantity] of [['EPS_BOX',10],['GEL_PACK',20]]){const item=app.createConsumable({code,name:code,reorderThreshold:0},key());app.receiveConsumable(item.id,{quantity,source:'test'},key())}
+  const source=(product='T',grade='A',harvestPeriod='2026-08-01')=>{const container=app.createContainer({capacityKg:20},key()),batch=app.receive({sessionId:session.id,containerId:container.id,supplier:'S',product,grade,size:'L',weightKg:10},key());Object.assign(batch,{status:'SORTED',destination:'FRESH_EXPORT',zone:'FRESH_EXPORT',harvestPeriod});Object.assign(container,{zone:'FRESH_EXPORT',status:'SORTED'});return{batch,container}};
+  return{app,session,source};
+}
+const lot=(c,s,count=4)=>c.app.createFreshNetLot({sessionId:c.session.id,batchId:s.batch.id,containerId:s.container.id,unitWeightKg:1,count},key());
+
+test('cancel restores every lot and both consumables while damage restores lots only',()=>{for(const action of ['CANCEL','DAMAGE']){const c=setup(),one=lot(c,c.source()),two=lot(c,c.source()),eps=c.app.state.consumables.find(x=>x.code==='EPS_BOX'),gel=c.app.state.consumables.find(x=>x.code==='GEL_PACK'),box=c.app.createShippingBox({sessionId:c.session.id,allocations:[{netLotId:one.id,count:2},{netLotId:two.id,count:3}],gelPackCount:2},key()),before=[eps.quantity,gel.quantity];assert.throws(()=>c.app.updateShippingBox(box.id,action,{},key()),e=>e.code==='FRESH_SHIPPING_BOX_REASON_REQUIRED');c.app.updateShippingBox(box.id,action,{reason:'physical handling'},key());assert.deepEqual([one.remainingCount,two.remainingCount],[4,4]);assert.equal(box.status,action==='CANCEL'?'CANCELLED':'DAMAGED');assert.deepEqual([eps.quantity,gel.quantity],action==='CANCEL'?[before[0]+1,before[1]+2]:before);if(action==='DAMAGE')assert.ok(c.app.state.exceptions.some(x=>x.type==='FRESH_SHIPPING_BOX_DAMAGED'&&x.entityId===box.id))}});
+
+test('shipped or actively assigned shipping boxes cannot terminate',()=>{const c=setup(),box=c.app.createShippingBox({sessionId:c.session.id,allocations:[{netLotId:lot(c,c.source()).id,count:1}]},key());box.status='SHIPPED';assert.throws(()=>c.app.updateShippingBox(box.id,'CANCEL',{reason:'late'},key()),e=>e.code==='FRESH_SHIPPING_BOX_TRANSITION_INVALID')});
+
+test('multi-source net lot preserves contributions, harvest origins and per-batch weight',()=>{const c=setup(),one=c.source('T','A','2026-01-01'),two=c.source('T','A','2026-02-02'),lot=c.app.createFreshNetLot({sessionId:c.session.id,containerId:one.container.id,unitWeightKg:1,sources:[{batchId:one.batch.id,count:2},{batchId:two.batch.id,count:3}]},key());assert.deepEqual(lot.sourceContributions,[{batchId:one.batch.id,count:2,weightKg:2},{batchId:two.batch.id,count:3,weightKg:3}]);assert.deepEqual([one.batch.weightKg,two.batch.weightKg],[8,7]);assert.deepEqual(lot.sourceContributions.map(x=>c.app.batch(x.batchId).harvestPeriod),['2026-01-01','2026-02-02']);assert.equal(lot.batchId,one.batch.id)});
+
+test('multi-source lots reject mixed classification and legacy single-source remains compatible',()=>{const c=setup(),one=c.source(),two=c.source('Truffle');assert.throws(()=>c.app.createFreshNetLot({sessionId:c.session.id,containerId:one.container.id,unitWeightKg:1,sources:[{batchId:one.batch.id,count:1},{batchId:two.batch.id,count:1}]},key()),e=>e.code==='FRESH_NET_LOT_MIXED_SOURCE');assert.equal(lot(c,one,2).sourceContributions[0].batchId,one.batch.id)});
+
+test('fresh-export termination and source contributions survive PostgreSQL reload',{skip:!process.env.DATABASE_URL},async()=>{const repo=new PostgresRepository({connectionString:process.env.DATABASE_URL,siteCode:`FR28-${Date.now()}`});try{const app=new StoreMesh({site:repo.siteCode,initialState:await repo.load(),seedDemoReferences:true});app.repository=repo;const c=setup(app),one=c.source(),two=c.source(),net=app.createFreshNetLot({sessionId:c.session.id,containerId:one.container.id,unitWeightKg:1,sources:[{batchId:one.batch.id,count:2},{batchId:two.batch.id,count:2}]},key()),box=app.createShippingBox({sessionId:c.session.id,allocations:[{netLotId:net.id,count:2}],gelPackCount:1},key());app.updateShippingBox(box.id,'DAMAGE',{reason:'cracked EPS'},key());await app.flush();const restored=await repo.load(),savedLot=restored.freshNetLots.find(x=>x.id===net.id),savedBox=restored.shippingBoxes.find(x=>x.id===box.id);assert.equal(savedBox.status,'DAMAGED');assert.equal(savedBox.terminalReason,'cracked EPS');assert.equal(savedLot.sourceContributions.length,2);assert.equal(savedLot.remainingCount,4)}finally{await repo.close()}});
