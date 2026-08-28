@@ -64,7 +64,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&u.pathname==='/api/harvest-periods'){needs('inventory:read');return send(200,{items:app.state.harvestPeriods});}
       if(req.method==='GET'&&/^\/api\/master-data\/(products|suppliers|grades|sizes|zones|packageTypes)$/.test(u.pathname)){needs('inventory:read');return send(200,{items:app.state.masterData[u.pathname.split('/')[3]]});}
       if(req.method==='GET'&&u.pathname==='/api/containers'){needs('inventory:read');return send(200,{items:app.state.containers});}
-      if(req.method==='GET'&&u.pathname==='/api/configurations'){needs('inventory:read');return send(200,{items:app.state.configurationVersions});}
+      if(req.method==='GET'&&u.pathname==='/api/configurations'){needs('inventory:read');return send(200,{items:app.configurationVersionsView()});}
       if(req.method==='GET'&&u.pathname==='/api/overrides'){needs('inventory:read');return send(200,{items:app.state.overrides});}
       if(req.method==='GET'&&u.pathname==='/api/inventory'){needs('inventory:read');return send(200,{items:app.inventory()});}
       if(req.method==='GET'&&u.pathname==='/api/print-jobs'){needs('inventory:read');return send(200,{items:app.state.printJobs});}
@@ -171,7 +171,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
     } catch(e){stats.errors++;app.record(e.code==='FORBIDDEN'?'PERMISSION_DENIED':'REQUEST_FAILED',null,e.code==='FORBIDDEN'?(e.details??{}):{method:req.method,path:req.url,errorCode:e.code??'SYSTEM'},null,auditContext.deviceId,'FAILURE');app.persist();const failure=errorResponse(e);if(failure.status>=500)console.error(JSON.stringify({level:'error',site:app.site,errorCode:e.code??'SYSTEM',message:e.message,at:new Date().toISOString()}));send(failure.status,failure.body);}
     });
   });
-  const idleSweep=setInterval(()=>app.sweepIdleSessions(),Math.min(Math.max(1000,Math.floor(app.idleSessionMs/2)),60000));idleSweep.unref();server.on('close',()=>clearInterval(idleSweep));server.stats=stats;return server;
+  const idleSweep=setInterval(()=>app.sweepIdleSessions(),1000);idleSweep.unref();server.on('close',()=>clearInterval(idleSweep));server.stats=stats;return server;
 }
 
 export async function createRuntimeServer() {
