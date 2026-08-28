@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { StoreMesh } from '../src/domain.js';
+import { PostgresRepository } from '../src/postgres-repository.js';
+
+const key=()=>randomUUID();
+const setup=(app=new StoreMesh(),product='T')=>{const session=app.openSession(randomUUID(),'TEST-DEVICE'),input=app.createContainer({capacityKg:20},key()),batch=app.receive({sessionId:session.id,containerId:input.id,supplier:'S',product,grade:'UNSORTED',size:'MIXED',weightKg:10},key()),output=app.createContainer({capacityKg:20},key());app.moveContainer(input.id,'COLD_ROOM_CLEAN',session.id,key());app.moveContainer(output.id,'SORTING',session.id,key());return{app,session,input,batch,output}};
+const sort=(fixture,weightKg,lossReason)=>fixture.app.sortBatch({sessionId:fixture.session.id,containerId:fixture.input.id,batchId:fixture.batch.id,outputs:[{grade:'A',size:'L',weightKg,containerId:fixture.output.id}],...(lossReason===undefined?{}:{lossReason})},key());
+
+test('non-zero Sorting loss requires a supported reason while zero loss does not',()=>{let fixture=setup();assert.throws(()=>sort(fixture,9),error=>error.code==='SORT_LOSS_REASON_REQUIRED');fixture=setup();assert.throws(()=>sort(fixture,9,'SHRINKAGE'),error=>error.code==='SORT_LOSS_REASON_INVALID');fixture=setup();const result=sort(fixture,10);assert.equal(result.lossKg,0);assert.equal(result.lossReason,null)});
+
+test('sorting loss report aggregates by site product and reason across events',()=>{const app=new StoreMesh();sort(setup(app),8,'MOISTURE_LOSS');sort(setup(app),7.5,'MOISTURE_LOSS');sort(setup(app),9,'DAMAGE');sort(setup(app,'Truffle'),9.5,'MOISTURE_LOSS');const report=app.sortingLossReport().items,moisture=report.find(x=>x.site==='IRAN'&&x.product==='T'&&x.lossReason==='MOISTURE_LOSS');assert.deepEqual(moisture,{site:'IRAN',product:'T',lossReason:'MOISTURE_LOSS',totalLossKg:4.5,eventCount:2});assert.equal(report.find(x=>x.product==='T'&&x.lossReason==='DAMAGE').totalLossKg,1);assert.equal(report.find(x=>x.product==='Truffle'&&x.lossReason==='MOISTURE_LOSS').totalLossKg,.5)});
+
+test('classified sorting loss and its aggregate survive a real PostgreSQL reload',{skip:!process.env.DATABASE_URL},async()=>{const siteCode=`SORT-LOSS-${Date.now()}`,repository=new PostgresRepository({connectionString:process.env.DATABASE_URL,siteCode});try{const app=new StoreMesh({site:siteCode,seedDemoReferences:true});app.repository=repository;const fixture=setup(app);sort(fixture,8.25,'RESIDUAL_MATERIAL');await app.flush();const restored=await repository.load(),batch=restored.batches.find(x=>x.id===fixture.batch.id),report=new StoreMesh({site:siteCode,initialState:restored,seedDemoReferences:false}).sortingLossReport();assert.equal(batch.sortingLossKg,1.75);assert.equal(batch.lossReason,'RESIDUAL_MATERIAL');assert.deepEqual(report.items,[{site:siteCode,product:'T',lossReason:'RESIDUAL_MATERIAL',totalLossKg:1.75,eventCount:1}])}finally{await repository.close()}});

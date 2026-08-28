@@ -81,6 +81,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&u.pathname==='/api/quality-checks'){needs('inventory:read');return send(200,{items:app.state.qualityChecks});}
       if(req.method==='GET'&&u.pathname==='/api/qc-checklists'){needs('inventory:read');return send(200,{items:app.state.qcChecklists});}
       if(req.method==='GET'&&u.pathname==='/api/reports/operations'){needs('inventory:read');return send(200,{data:app.reports()});}
+      if(req.method==='GET'&&u.pathname==='/api/reports/sorting-loss'){needs('inventory:read');return send(200,{data:app.sortingLossReport({from:u.searchParams.get('from'),to:u.searchParams.get('to')})});}
       if(req.method==='GET'&&u.pathname==='/api/inventory-adjustments'){needs('inventory:read');return send(200,{items:app.state.inventoryAdjustments});}
       if(req.method==='GET'&&u.pathname==='/api/audit'){needs('audit:read');return send(200,{items:app.state.audit});}
       if(req.method==='GET'&&u.pathname==='/api/internal-transfers'){needs('inventory:read');return send(200,{items:app.state.internalTransfers});}
