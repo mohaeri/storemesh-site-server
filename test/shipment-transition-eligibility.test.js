@@ -14,7 +14,7 @@ function assigned(x){x.shipment=x.app.createShipment({salesOrderId:x.order.id,pa
 function scanned(x){x.app.updateShipment(x.shipment.id,'START_PICKING',{},key());x.app.scanShipmentCarton(x.shipment.id,{sessionId:x.session.id,cartonCode:x.carton.code},key());return x}
 
 test('shipment creation requires current QC approval and a genuinely completed label print',()=>{
-  let x=fixture({approve:false});assert.throws(()=>x.app.createShipment({salesOrderId:x.order.id,packageIds:[x.carton.id]},key()),e=>e.code==='SHIPMENT_QC_APPROVAL_REQUIRED');
+  let x=fixture({approve:false});assert.throws(()=>x.app.createShipment({salesOrderId:x.order.id,packageIds:[x.carton.id]},key()),e=>e.code==='BATCH_QC_APPROVAL_REQUIRED');
   x=fixture();x.app.state.labels.find(l=>l.entityType==='PACKAGE'&&l.entityId===x.carton.id).status='PENDING';assert.throws(()=>x.app.createShipment({salesOrderId:x.order.id,packageIds:[x.carton.id]},key()),e=>e.code==='SHIPMENT_LABEL_NOT_PRINTED');
 });
 
