@@ -182,6 +182,8 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/configurations\/[^/]+\/(approve|activate)$/.test(u.pathname)){needs('config:approve');const parts=u.pathname.split('/');await body();result=app.transitionConfiguration(parts[3],parts[4].toUpperCase(),user.sub,key);}
       else if(req.method==='POST'&&u.pathname==='/api/overrides'){needs('operations:write');const b=await body();result=app.requestOverride({...b,requestedBy:user.sub},key);}
       else if(req.method==='POST'&&/^\/api\/overrides\/[^/]+\/resolve$/.test(u.pathname)){needs('override:approve');const b=await body();result=app.resolveOverride(u.pathname.split('/')[3],{...b,resolvedBy:user.sub},key);}
+      else if(req.method==='POST'&&u.pathname==='/api/labels/reprint'){needs('print:write');const b=await body();if(app.reprintApprovalRequired(b.objectType))needs('override:approve');result=app.reprintLabel(b,key);}
+      else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/printer$/.test(u.pathname)){needs('print:write');const b=await body();result=app.overridePrintPrinter(u.pathname.split('/')[3],b.printerId,b.sessionId,key);}
       else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/claim$/.test(u.pathname)){needs('print:write');const b=await body();result=app.claimPrint(u.pathname.split('/')[3],b.sessionId);}
       else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/complete$/.test(u.pathname)){needs('print:write');const b=await body();result=app.completePrint(u.pathname.split('/')[3],b.sessionId);}
       else if(req.method==='POST'&&/^\/api\/print-jobs\/[^/]+\/fail$/.test(u.pathname)){needs('print:write');const b=await body();result=app.failPrint(u.pathname.split('/')[3],b.reason,b.sessionId);}
