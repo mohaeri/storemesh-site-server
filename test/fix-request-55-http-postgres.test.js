@@ -9,7 +9,7 @@ import { createServer } from '../src/server.js';
 const pgOnly={skip:!process.env.DATABASE_URL};
 const key=()=>crypto.randomUUID();
 
-function approve(app,batch){const stage=app.batchQcStage(batch),checklist=app.createQcChecklist({code:`FR55-${crypto.randomUUID()}`,product:batch.product,stage,name:'Shipping QC',items:[{code:'OK',prompt:'Approved'}]},key());app.qualityCheck({batchId:batch.id,stage,checklistId:checklist.id,responses:[{itemCode:'OK',value:true}],result:'APPROVED',notes:'Approved for shipping',inspectorId:crypto.randomUUID(),actorRoles:['QUALITY_OPERATOR'],attestation:{confirmed:true,role:'QUALITY_OPERATOR'}},key())}
+function approve(app,batch){const stage=app.batchQcStage(batch)==='FRESH_EXPORT'?'PACKAGING':app.batchQcStage(batch),checklist=app.createQcChecklist({code:`FR55-${crypto.randomUUID()}`,product:batch.product,stage,name:'Shipping QC',items:[{code:'OK',prompt:'Approved'}]},key());app.qualityCheck({sessionId:app.state.sessions.find(x=>x.status==='ACTIVE')?.id,batchId:batch.id,stage,checklistId:checklist.id,responses:[{itemCode:'OK',value:true}],result:'APPROVED',notes:'Approved for shipping',inspectorId:crypto.randomUUID(),actorRoles:['QUALITY_OPERATOR'],attestation:{confirmed:true,role:'QUALITY_OPERATOR'}},key())}
 
 test('FR55 full HTTP fresh-export chain survives real PostgreSQL reload',pgOnly,async()=>{
   const site=`FR55-${Date.now()}`,repo=new PostgresRepository({connectionString:process.env.DATABASE_URL,siteCode:site}),app=new StoreMesh({site,initialState:await repo.load(),seedDemoReferences:true});app.repository=repo;

@@ -6,7 +6,7 @@ import { PostgresRepository } from '../src/postgres-repository.js';
 let sequence=0;
 const key=label=>`${label}-${++sequence}-${crypto.randomUUID()}`;
 
-function approveForShipping(app,batch){const stage=app.batchQcStage(batch),checklist=app.createQcChecklist({code:`SHIP-${sequence}-${crypto.randomUUID()}`,product:batch.product,stage,name:'Shipping QC',items:[{code:'OK',prompt:'Approved for shipping'}]},key('checklist'));return app.qualityCheck({batchId:batch.id,stage,checklistId:checklist.id,responses:[{itemCode:'OK',value:true}],result:'APPROVED',notes:'Approved for shipping',inspectorId:crypto.randomUUID(),actorRoles:['QUALITY_OPERATOR'],attestation:{confirmed:true,role:'QUALITY_OPERATOR'}},key('qc'))}
+function approveForShipping(app,batch){const stage=app.batchQcStage(batch),checklist=app.createQcChecklist({code:`SHIP-${sequence}-${crypto.randomUUID()}`,product:batch.product,stage,name:'Shipping QC',items:[{code:'OK',prompt:'Approved for shipping'}]},key('checklist'));return app.qualityCheck({sessionId:app.state.sessions.find(x=>x.status==='ACTIVE')?.id,batchId:batch.id,stage,checklistId:checklist.id,responses:[{itemCode:'OK',value:true}],result:'APPROVED',notes:'Approved for shipping',inspectorId:crypto.randomUUID(),actorRoles:['QUALITY_OPERATOR'],attestation:{confirmed:true,role:'QUALITY_OPERATOR'}},key('qc'))}
 
 function freshShipmentFixture(app){
   const session=app.openSession('fresh-operator','TEST-DEVICE','FRESH_EXPORT','FRESH_EXPORT_OPERATOR');

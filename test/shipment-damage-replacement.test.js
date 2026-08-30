@@ -15,7 +15,7 @@ function fixture(app=new StoreMesh()){
     const batch=app.receive({sessionId:session.id,containerId:container.id,supplier:'S',product:'T',grade:'A',size:'L',weightKg:3},key());
     batch.status='READY_FOR_PACKAGING';
     const checklist=app.createQcChecklist({code:`SHIP-${key()}`,product:batch.product,stage:'PACKAGING',name:'Shipping QC',items:[{code:'OK',prompt:'OK'}]},key());
-    app.qualityCheck({batchId:batch.id,stage:'PACKAGING',checklistId:checklist.id,responses:[{itemCode:'OK',value:true}],result:'APPROVED',inspectorId:key(),actorRoles:['QUALITY_OPERATOR'],attestation:{confirmed:true,role:'QUALITY_OPERATOR'}},key());
+    app.qualityCheck({sessionId:app.state.sessions.find(x=>x.status==='ACTIVE')?.id,batchId:batch.id,stage:'PACKAGING',checklistId:checklist.id,responses:[{itemCode:'OK',value:true}],result:'APPROVED',inspectorId:key(),actorRoles:['QUALITY_OPERATOR'],attestation:{confirmed:true,role:'QUALITY_OPERATOR'}},key());
     batch.status='PACKAGED';
     const carton={id:key(),code:`C-${key()}`,type:'CARTON',level:'CARTON',status:'READY_TO_SHIP',shipmentId:null,parentPackageId:null,childPackageIds:[],items:[{batchId:batch.id,weightKg:1}],sessionId:session.id,deviceId:session.deviceId,createdAt:new Date().toISOString()};
     const label={id:key(),entityType:'PACKAGE',entityId:carton.id,identity:carton.code,payload:{},status:'PRINTED',createdAt:new Date().toISOString()};

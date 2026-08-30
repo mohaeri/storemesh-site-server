@@ -26,7 +26,7 @@ test('FIFO deviation, quarantine and equipment failure raise exceptions',()=>{
   app.move(newer.id,'SORTING',session.id,'fifo');
   const tray=app.createContainer({type:'TRAY',capacityKg:10},'tray');app.assignBatchToContainer(tray.id,newer.id,session.id,'tray-assign');
   const checklist=app.createQcChecklist({code:'QC-T',product:oldest.product,stage:'RECEIVING',name:'QC',items:[{code:'VISUAL',prompt:'Visual pass'}]},'checklist');
-  app.qualityCheck({batchId:oldest.id,stage:'RECEIVING',checklistId:checklist.id,responses:[{itemCode:'VISUAL',value:false}],attestation:{confirmed:true,role:'QUALITY_OPERATOR'},actorRoles:['QUALITY_OPERATOR'],result:'QUARANTINED',inspectorId:'qc'},'qc');
+  app.qualityCheck({sessionId:app.state.sessions.find(x=>x.status==='ACTIVE')?.id,batchId:oldest.id,stage:'RECEIVING',checklistId:checklist.id,responses:[{itemCode:'VISUAL',value:false}],attestation:{confirmed:true,role:'QUALITY_OPERATOR'},actorRoles:['QUALITY_OPERATOR'],result:'QUARANTINED',inspectorId:'qc'},'qc');
   newer.status='SLICED';newer.zone='FREEZING';tray.status='SLICED';tray.zone='FREEZING';tray.activeSessionId=null;
   const cycle=app.createCycle({sessionId:session.id,type:'FREEZE',machineId:'freezer-1',trayIds:[tray.id]},'cycle');
   app.transitionCycle(cycle.id,'START',{sessionId:session.id},'start');app.transitionCycle(cycle.id,'FAIL',{sessionId:session.id,reason:'power'},'fail');
