@@ -142,6 +142,10 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       else if(req.method==='POST'&&/^\/api\/batches\/[^/]+\/priority$/.test(u.pathname)){needs('batch:override');const b=await body();result=app.setBatchPriority(u.pathname.split('/')[3],b.priority,b.reason,key);}
       else if(req.method==='POST'&&/^\/api\/shipments\/[^/]+\/priority$/.test(u.pathname)){needs('shipment:override');const b=await body();result=app.setShipmentPriority(u.pathname.split('/')[3],b.priority,b.reason,key);}
       else if(req.method==='POST'&&/^\/api\/fresh-shipping-boxes\/[^/]+\/split$/.test(u.pathname)){needs('shipment:override');result=app.splitShippingBox(u.pathname.split('/')[3],await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/fresh-shipping-boxes\/[^/]+\/cold-holding$/.test(u.pathname)){needs('fresh-export:write');result=app.moveToColdHolding(u.pathname.split('/')[3],await body(),key);}
+      else if(req.method==='POST'&&u.pathname==='/api/fresh-shipping-boxes/drafts'){needs('fresh-export:write');result=app.draftShippingBox(await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/fresh-shipping-boxes\/[^/]+\/draft$/.test(u.pathname)){needs('fresh-export:write');result=app.updateShippingBoxDraft(u.pathname.split('/')[3],await body(),key);}
+      else if(req.method==='POST'&&/^\/api\/fresh-shipping-boxes\/[^/]+\/confirm$/.test(u.pathname)){needs('fresh-export:write');result=app.confirmShippingBox(u.pathname.split('/')[3],await body(),key);}
       else if(req.method==='POST'&&/^\/api\/shipments\/[^/]+\/merge$/.test(u.pathname)){needs('shipment:override');const b=await body();result=app.mergeShipments(u.pathname.split('/')[3],b.targetShipmentId,b.reason,key);}
       else if(req.method==='POST'&&u.pathname==='/api/fresh-net-lots'){needs('fresh-export:write');result=app.createFreshNetLot(await body(),key);}
       else if(req.method==='POST'&&u.pathname==='/api/fresh-shipping-boxes'){needs('fresh-export:write');result=app.createShippingBox(await body(),key);}
