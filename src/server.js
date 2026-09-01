@@ -20,7 +20,7 @@ const receivingContainerInput=input=>{
   return{type,capacityKg:input.capacityKg,tareWeightKg:input.tareWeightKg,zone,designatedZones:[...new Set(designatedZones.map(code=>String(code).toUpperCase()))]};
 };
 
-export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN', repository: process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null }), auth = null, requireAuth = true } = {}) {
+export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE || 'IRAN', repository: process.env.DATA_FILE ? new JsonRepository(process.env.DATA_FILE) : null }), auth = null, requireAuth = true, trustProxy = process.env.TRUST_PROXY === 'true' } = {}) {
   auth ??= new AuthService({ site: app.site });
   if (!auth.users.size) {
     const demoAllowed=process.env.NODE_ENV!=='production'&&process.env.ALLOW_DEMO_CREDENTIALS!=='false';
@@ -31,7 +31,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
   const stats={requests:0,errors:0,startedAt:Date.now()};
   const auditedMutation=options=>applyAuditedAuthMutation({...options,persist:()=>app.persist(),flush:()=>app.flush()});
   const server=http.createServer(async (req,res)=>{
-    const auditContext={requestId:String(req.headers['x-request-id']??randomUUID()),ipAddress:String(req.headers['x-forwarded-for']??req.socket.remoteAddress??'').split(',')[0].trim()||null,userId:null,deviceId:null};
+    const auditContext={requestId:String(req.headers['x-request-id']??randomUUID()),ipAddress:String(trustProxy?(req.headers['x-forwarded-for']??req.socket.remoteAddress??''):(req.socket.remoteAddress??'')).split(',')[0].trim()||null,userId:null,deviceId:null};
     return app.withAuditContext(auditContext,async()=>{
     stats.requests++;
     res.setHeader('Access-Control-Allow-Origin','*'); res.setHeader('Access-Control-Allow-Headers','Content-Type,Idempotency-Key,Authorization,X-Request-Id'); res.setHeader('Access-Control-Allow-Methods','GET,POST,DELETE,OPTIONS');res.setHeader('X-Request-Id',auditContext.requestId);
