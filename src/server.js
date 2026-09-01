@@ -9,6 +9,9 @@ import { OutboxPublisher } from './outbox-publisher.js';
 import { errorResponse } from './errors.js';
 import { applyAuditedAuthMutation, credentialFingerprint, reconcileAuthAudit } from './auth-audit-integrity.js';
 export const BOOTSTRAP_ADMIN_ID='00000000-0000-4000-a000-000000000001',BOOTSTRAP_OPERATOR_ID='00000000-0000-4000-a000-000000000002';
+// audit_events.request_id is TEXT in PostgreSQL; keep this application-level cap aligned with that schema deliberately.
+const REQUEST_ID_MAX_LENGTH=128;
+const requestIdFromHeader=value=>{const candidate=String(value??'').trim();return candidate&&candidate.length<=REQUEST_ID_MAX_LENGTH?candidate:randomUUID()};
 
 const receivingContainerInput=input=>{
   const allowedFields=new Set(['type','capacityKg','tareWeightKg','zone','designatedZones']);
@@ -31,7 +34,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
   const stats={requests:0,errors:0,startedAt:Date.now()};
   const auditedMutation=options=>applyAuditedAuthMutation({...options,persist:()=>app.persist(),flush:()=>app.flush()});
   const server=http.createServer(async (req,res)=>{
-    const auditContext={requestId:String(req.headers['x-request-id']??randomUUID()),ipAddress:String(trustProxy?(req.headers['x-forwarded-for']??req.socket.remoteAddress??''):(req.socket.remoteAddress??'')).split(',')[0].trim()||null,userId:null,deviceId:null};
+    const auditContext={requestId:requestIdFromHeader(req.headers['x-request-id']),ipAddress:String(trustProxy?(req.headers['x-forwarded-for']??req.socket.remoteAddress??''):(req.socket.remoteAddress??'')).split(',')[0].trim()||null,userId:null,deviceId:null};
     return app.withAuditContext(auditContext,async()=>{
     stats.requests++;
     res.setHeader('Access-Control-Allow-Origin','*'); res.setHeader('Access-Control-Allow-Headers','Content-Type,Idempotency-Key,Authorization,X-Request-Id'); res.setHeader('Access-Control-Allow-Methods','GET,POST,DELETE,OPTIONS');res.setHeader('X-Request-Id',auditContext.requestId);
