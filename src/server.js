@@ -12,6 +12,8 @@ export const BOOTSTRAP_ADMIN_ID='00000000-0000-4000-a000-000000000001',BOOTSTRAP
 // audit_events.request_id is TEXT in PostgreSQL; keep this application-level cap aligned with that schema deliberately.
 const REQUEST_ID_MAX_LENGTH=128;
 const requestIdFromHeader=value=>{const candidate=String(value??'').trim();return candidate&&candidate.length<=REQUEST_ID_MAX_LENGTH?candidate:randomUUID()};
+// Current JSON APIs carry identifiers, metadata, and item arrays (not file/base64 uploads); 2 MiB leaves ample headroom.
+const REQUEST_BODY_MAX_BYTES=2*1024*1024;
 
 const receivingContainerInput=input=>{
   const allowedFields=new Set(['type','capacityKg','tareWeightKg','zone','designatedZones']);
@@ -40,7 +42,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
     res.setHeader('Access-Control-Allow-Origin','*'); res.setHeader('Access-Control-Allow-Headers','Content-Type,Idempotency-Key,Authorization,X-Request-Id'); res.setHeader('Access-Control-Allow-Methods','GET,POST,DELETE,OPTIONS');res.setHeader('X-Request-Id',auditContext.requestId);
     if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
-    const body=async()=>{let raw='';for await(const c of req)raw+=c;return raw?JSON.parse(raw):{};};
+    const body=()=>new Promise((resolve,reject)=>{const chunks=[];let bytes=0,settled=false;const cleanup=()=>{req.off('data',onData);req.off('end',onEnd);req.off('error',onError)},finish=(error,value)=>{if(settled)return;settled=true;cleanup();error?reject(error):resolve(value)},onData=chunk=>{bytes+=chunk.length;if(bytes>REQUEST_BODY_MAX_BYTES){finish(new DomainError('PAYLOAD_TOO_LARGE',`Request body must not exceed ${REQUEST_BODY_MAX_BYTES} bytes`,413));req.resume();return}chunks.push(chunk)},onEnd=()=>{try{const raw=Buffer.concat(chunks,bytes).toString('utf8');finish(null,raw?JSON.parse(raw):{})}catch(error){finish(error)}},onError=error=>finish(error);req.on('data',onData);req.on('end',onEnd);req.on('error',onError)});
     try {
       const u=new URL(req.url,'http://localhost'); const key=req.headers['idempotency-key']; let result;
       if(req.method==='GET'&&u.pathname==='/health') return send(200,{status:'ok',site:app.site});
