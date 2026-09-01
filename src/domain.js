@@ -14,6 +14,8 @@ const CONTAINER_GATES={
 const CYCLE_TYPES=new Set(['FREEZE','FREEZE_DRY','DRY']);
 const ACTIVE_CYCLE_STATUSES=new Set(['READY','LOADING','RUNNING','IN_PROGRESS','PAUSED','COMPLETING']);
 const UUID_PATTERN=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// idempotency_records.idempotency_key is TEXT in PostgreSQL; bound it here before it reaches the primary-key index.
+const IDEMPOTENCY_KEY_MAX_LENGTH=128;
 const REFERENCE_TYPES=new Set(['products','suppliers','grades','sizes','zones','packageTypes']);
 const CONFIGURATION_SCOPES=new Set(['PACKAGING','PRINTING','CONSUMABLES','STATION_MACHINES','RECEIVING','WAREHOUSE_MOVEMENT','STORAGE','YIELD_THRESHOLDS','FRESH_EXPORT','SYSTEM_TIMEOUTS','EXCEPTION_CATEGORIES','EXCEPTION_SLA']);
 const isFiniteNumber=value=>typeof value==='number'&&Number.isFinite(value);
@@ -125,6 +127,7 @@ export class StoreMesh {
   run(key, action, fn, request = {}) {
     const now=Date.parse(this.clock());for(const[k,meta]of this.state.idempotencyMeta)if(Date.parse(meta.expiresAt)<=now){this.state.idempotencyMeta.delete(k);this.state.idempotency.delete(k)}
     if (!key) throw new DomainError('IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key is required', 400);
+    if (String(key).length > IDEMPOTENCY_KEY_MAX_LENGTH) throw new DomainError('IDEMPOTENCY_KEY_INVALID', `Idempotency-Key must not exceed ${IDEMPOTENCY_KEY_MAX_LENGTH} characters`, 400);
     const qcSession=['QUALITY_CHECK_RECORDED','QUARANTINE_RELEASED'].includes(action)?this.requireSession(request.sessionId):null;
     if(qcSession){const operation=fn;fn=()=>Object.assign(operation(),{sessionId:qcSession.id,deviceId:qcSession.deviceId})}
     if(action==='QUALITY_CHECK_RECORDED'&&request.result==='QUARANTINED'){const batch=this.batch(request.batchId);if(batch.status==='QUARANTINED'||batch.zone==='QUARANTINE')throw new DomainError('BATCH_ALREADY_QUARANTINED','Batch is already quarantined; release it before another quarantine decision',409)}
