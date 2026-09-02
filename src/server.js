@@ -224,6 +224,7 @@ export async function createRuntimeServer() {
   if (process.env.DATABASE_URL) app.repository = repository;
   const authStore=process.env.DATABASE_URL?new PostgresAuthStore({pool:repository.pool,siteId:repository.siteId,siteCode:site}):null,auth=new AuthService({site,store:authStore});await auth.hydrate();
   const server=createServer({ app, auth, requireAuth:authRequiredFromEnvironment() });await auth.flush();
+  if(process.env.DATABASE_URL){const archiveIntervalMs=Math.max(60000,Number(process.env.AUDIT_ARCHIVE_INTERVAL_MS||86400000)),archiveSweep=setInterval(()=>repository.archiveHistory().catch(error=>console.error(JSON.stringify({level:'error',site,errorCode:'ARCHIVE_FAILED',message:error.message,at:new Date().toISOString()}))),archiveIntervalMs);archiveSweep.unref();server.on('close',()=>clearInterval(archiveSweep));server.archiveHistory=()=>repository.archiveHistory()}
   const publisher=new OutboxPublisher({app,cloudUrl:process.env.CLOUD_URL,siteKey:process.env.SITE_SYNC_KEY});publisher.start();server.on('close',()=>publisher.stop());server.storemesh={app,publisher};return server;
 }
 
