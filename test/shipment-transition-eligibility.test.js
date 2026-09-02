@@ -11,7 +11,7 @@ function fixture({approve=true}={}){
   const customer=app.createCustomer({code:`C-${key()}`,name:'Customer'},key()),order=app.createSalesOrder({customerId:customer.id,items:[{packageType:'CARTON',quantity:1}]},key());return{app,session,batch,unit,carton,order,record};
 }
 function assigned(x){x.shipment=x.app.createShipment({salesOrderId:x.order.id,packageIds:[x.carton.id]},key());return x}
-function scanned(x){x.app.updateShipment(x.shipment.id,'START_PICKING',{},key());x.app.scanShipmentCarton(x.shipment.id,{sessionId:x.session.id,cartonCode:x.carton.code},key());return x}
+function scanned(x){x.app.updateShipment(x.shipment.id,'START_PICKING',{},key());x.app.scanShipmentCarton(x.shipment.id,{sessionId:x.session.id,cartonCode:x.carton.code},key());const task=x.app.state.tasks.find(item=>item.entityId===x.carton.id&&item.operationType==='SHIPMENT_SHIP');assert.equal(x.shipment.status,'PICKING');assert.equal(task.status,'COMPLETED');assert.ok(task.completedAt);assert.equal(task.stateHistory.at(-1).action,'AUTO_SCAN_COMPLETE');return x}
 
 test('shipment creation requires current QC approval and a genuinely completed label print',()=>{
   let x=fixture({approve:false});assert.throws(()=>x.app.createShipment({salesOrderId:x.order.id,packageIds:[x.carton.id]},key()),e=>e.code==='BATCH_QC_APPROVAL_REQUIRED');

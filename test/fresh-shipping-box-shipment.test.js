@@ -26,15 +26,25 @@ function freshShipmentFixture(app){
 
 function shipFreshBox(app,{session,box,order}){
   const shipment=app.createShipment({salesOrderId:order.id,shippingBoxIds:[box.id]},key('shipment'));
+  const task=app.state.tasks.find(x=>x.entityId===box.id&&x.operationType==='SHIPMENT_SHIP');
   assert.equal(box.shipmentId,shipment.id);
   app.updateShipment(shipment.id,'START_PICKING',{},key('picking'));
   assert.throws(()=>app.updateShipment(shipment.id,'READY',{},key('unscanned')),e=>e.code==='SHIPMENT_SCAN_INCOMPLETE');
   const scan=app.scanShipmentCarton(shipment.id,{sessionId:session.id,itemCode:box.code},key('scan'));
   assert.equal(scan.shippingBoxId,box.id);
   assert.equal(scan.itemType,'FRESH_SHIPPING_BOX');
+  assert.equal(shipment.status,'PICKING');
+  assert.equal(task.status,'COMPLETED');
+  assert.ok(task.completedAt);
+  assert.equal(task.completionNote,'Physical shipment item scan completed');
+  assert.equal(task.stateHistory.at(-1).action,'AUTO_SCAN_COMPLETE');
   app.updateShipment(shipment.id,'READY',{},key('ready'));
+  assert.equal(task.status,'COMPLETED');
   app.updateShipment(shipment.id,'LOAD',{vehicle:'FRESH-TRUCK-1'},key('load'));
+  task.status='OPEN';task.completedAt=null;
   app.updateShipment(shipment.id,'SHIP',{},key('ship'));
+  assert.equal(task.status,'COMPLETED');
+  assert.equal(task.stateHistory.at(-1).action,'AUTO_SHIPMENT_SHIP');
   assert.equal(box.status,'SHIPPED');
   assert.equal(order.status,'FULFILLED');
   return{shipment,scan};
@@ -66,5 +76,6 @@ test('Fresh Net Lot -> Shipping Box -> Shipment -> SHIP survives a real PostgreS
     assert.equal(savedScan.shippingBoxId,fixture.box.id);
     assert.equal(savedScan.itemType,'FRESH_SHIPPING_BOX');
     assert.equal(restored.salesOrders.find(x=>x.id===fixture.order.id).status,'FULFILLED');
+    const savedTask=restored.tasks.find(x=>x.entityId===fixture.box.id&&x.operationType==='SHIPMENT_SHIP');assert.equal(savedTask.status,'COMPLETED');assert.ok(savedTask.stateHistory.some(x=>x.action==='AUTO_SCAN_COMPLETE'));
   }finally{await repo.close()}
 });
