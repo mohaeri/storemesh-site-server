@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {StoreMesh} from '../src/domain.js';
 import {PostgresRepository} from '../src/postgres-repository.js';
+import { guardedHistoryCleanup } from '../support/postgres-cleanup.js';
 
 const key=()=>randomUUID();
 
@@ -33,5 +34,5 @@ test('Part C filters combine and dashboard counts critical overdue category and 
 test('real PostgreSQL persists the complete exception audit record',{skip:!process.env.DATABASE_URL},async()=>{
   const siteCode=`FR54-${Date.now()}`,repository=new PostgresRepository({connectionString:process.env.DATABASE_URL,siteCode});
   try{const app=new StoreMesh({site:siteCode,initialState:await repository.load()});app.repository=repository;const issue=app.raiseException({type:'SHIPMENT_DELAY',entityType:'SHIPMENT',entityId:randomUUID(),severity:'CRITICAL',createdBy:'creator',productionArea:'Dispatch'},key());app.assignException(issue.id,{assignedTo:'operator'},key());app.startExceptionWork(issue.id,{actorId:'operator'},key());app.resolveException(issue.id,{decision:'RESOLVED',resolvedBy:'manager',resolutionNote:'rerouted'},key());app.closeException(issue.id,{closedBy:'manager',rootCause:'carrier'},key());await app.flush();const stored=(await repository.load()).exceptions.find(x=>x.id===issue.id);assert.equal(stored.category,'Shipping');assert.equal(stored.status,'CLOSED');assert.equal(stored.createdBy,'creator');assert.equal(stored.assignedTo,'operator');assert.equal(stored.closedBy,'manager');assert.equal(stored.rootCause,'carrier')}
-  finally{for(const table of['outbox_events','audit_events','idempotency_records','operational_exceptions','devices','products','suppliers','grades','sizes','zones','package_types','site_state_versions'])await repository.pool.query(`DELETE FROM ${table} WHERE site_id=$1`,[repository.siteId]);await repository.pool.query('DELETE FROM sites WHERE id=$1',[repository.siteId]);await repository.close()}
+  finally{await guardedHistoryCleanup(repository.pool,repository.siteId);for(const table of['outbox_events','audit_events','idempotency_records','operational_exceptions','devices','products','suppliers','grades','sizes','zones','package_types','site_state_versions'])await repository.pool.query(`DELETE FROM ${table} WHERE site_id=$1`,[repository.siteId]);await repository.pool.query('DELETE FROM sites WHERE id=$1',[repository.siteId]);await repository.close()}
 });

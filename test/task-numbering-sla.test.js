@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {StoreMesh} from '../src/domain.js';
 import {PostgresRepository} from '../src/postgres-repository.js';
+import { guardedHistoryCleanup } from '../support/postgres-cleanup.js';
 
 test('manual and automatic tasks receive sequential readable codes without collisions',()=>{
   const app=new StoreMesh({site:'IRAN'});
@@ -24,5 +25,5 @@ test('overdue is derived only for open tasks with a past due date',()=>{
 
 test('task code and SLA fields survive PostgreSQL reload',{skip:!process.env.DATABASE_URL},async()=>{
   const site=`TASK-SLA-${Date.now()}`,repository=new PostgresRepository({connectionString:process.env.DATABASE_URL,siteCode:site});
-  try{let app=new StoreMesh({site,initialState:await repository.load()});app.repository=repository;const task=app.createTask({title:'Persistent SLA',zone:'QC',dueAt:'2026-12-31T20:30:00Z',expectedDurationMinutes:45},'persist');await app.flush();app=new StoreMesh({site,initialState:await repository.load()});const loaded=app.state.tasks.find(x=>x.id===task.id);assert.equal(loaded.code,'T-'+site+'-000001');assert.equal(loaded.dueAt,'2026-12-31T20:30:00.000Z');assert.equal(loaded.expectedDurationMinutes,45)}finally{for(const table of['outbox_events','audit_events','idempotency_records','tasks','devices','products','suppliers','grades','sizes','zones','package_types','site_state_versions'])await repository.pool.query(`DELETE FROM ${table} WHERE site_id=$1`,[repository.siteId]);await repository.pool.query('DELETE FROM sites WHERE id=$1',[repository.siteId]);await repository.close()}
+  try{let app=new StoreMesh({site,initialState:await repository.load()});app.repository=repository;const task=app.createTask({title:'Persistent SLA',zone:'QC',dueAt:'2026-12-31T20:30:00Z',expectedDurationMinutes:45},'persist');await app.flush();app=new StoreMesh({site,initialState:await repository.load()});const loaded=app.state.tasks.find(x=>x.id===task.id);assert.equal(loaded.code,'T-'+site+'-000001');assert.equal(loaded.dueAt,'2026-12-31T20:30:00.000Z');assert.equal(loaded.expectedDurationMinutes,45)}finally{await guardedHistoryCleanup(repository.pool,repository.siteId);for(const table of['outbox_events','audit_events','idempotency_records','tasks','devices','products','suppliers','grades','sizes','zones','package_types','site_state_versions'])await repository.pool.query(`DELETE FROM ${table} WHERE site_id=$1`,[repository.siteId]);await repository.pool.query('DELETE FROM sites WHERE id=$1',[repository.siteId]);await repository.close()}
 });

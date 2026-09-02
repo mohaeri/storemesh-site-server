@@ -12,12 +12,11 @@ test('audit API optionally returns normalized PostgreSQL archive history with li
   const repository = new PostgresRepository({ connectionString: process.env.DATABASE_URL, siteCode: site });
   let server;
   try {
-    const seeded = new StoreMesh({ site, initialState: await repository.load(), seedDemoReferences: false });
+    const seeded = new StoreMesh({ site, initialState: await repository.load(), seedDemoReferences: false, clock: () => '2020-01-01T00:00:00.000Z' });
     seeded.repository = repository;
     const archivedSource = seeded.record('ARCHIVE_VISIBILITY_TEST', null, { marker: 'archived' });
     seeded.persist();
     await seeded.flush();
-    await repository.pool.query("UPDATE audit_events SET occurred_at=now()-interval '400 days' WHERE id=$1", [archivedSource.id]);
     await repository.pool.query("UPDATE outbox_events SET occurred_at=now()-interval '400 days',status='DELIVERED' WHERE id=$1", [archivedSource.id]);
     assert.deepEqual(await repository.archiveHistory({ auditRetentionDays: 365, outboxRetentionDays: 30 }), { audit: 1, outbox: 1 });
 

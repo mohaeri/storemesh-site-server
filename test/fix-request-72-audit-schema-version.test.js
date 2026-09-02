@@ -7,7 +7,7 @@ test('audit schemaVersion survives PostgreSQL reload and archival unchanged', { 
   const site = `FR72-${Date.now()}`;
   const repository = new PostgresRepository({ connectionString: process.env.DATABASE_URL, siteCode: site });
   try {
-    const app = new StoreMesh({ site, initialState: await repository.load(), seedDemoReferences: false });
+    const app = new StoreMesh({ site, initialState: await repository.load(), seedDemoReferences: false, clock: () => '2020-01-01T00:00:00.000Z' });
     app.repository = repository;
     const event = app.record('SCHEMA_VERSION_PERSISTENCE_TEST', null, { marker: 'v7' });
     event.schemaVersion = 7;
@@ -20,7 +20,6 @@ test('audit schemaVersion survives PostgreSQL reload and archival unchanged', { 
     const reloaded = await repository.load();
     assert.equal(reloaded.audit.find(item => item.id === event.id).schemaVersion, 7);
 
-    await repository.pool.query("UPDATE audit_events SET occurred_at=now()-interval '400 days' WHERE id=$1", [event.id]);
     await repository.pool.query("UPDATE outbox_events SET occurred_at=now()-interval '400 days',status='DELIVERED' WHERE id=$1", [event.id]);
     assert.deepEqual(await repository.archiveHistory({ auditRetentionDays: 365, outboxRetentionDays: 30 }), { audit: 1, outbox: 1 });
     const archived = await repository.archivedAuditEvents();
