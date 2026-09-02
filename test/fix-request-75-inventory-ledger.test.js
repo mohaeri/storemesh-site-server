@@ -20,7 +20,7 @@ test('receiving, identity-preserving transforms, merge, packaging and consumable
   Object.assign(a.container,{zone:'SLICING',status:'WASHED'});a.batch.zone='SLICING';
   app.transform({sessionId:session.id,containerId:a.container.id,inputs:[{batchId:a.batch.id}],process:'SLICE'},key());
   assert.deepEqual(entry(app,'BATCH',a.batch.id,'SLICE_IDENTITY_PRESERVED').map(x=>x.delta),[0]);
-  const merged=app.transform({sessionId:session.id,process:'MERGE',inputs:[{batchId:a.batch.id,consumeWeightKg:2},{batchId:b.batch.id,consumeWeightKg:3}],outputWeightKg:4},key());
+  const mergeContainer=app.createContainer({capacityKg:20,zone:'SORTING',designatedZones:['SORTING']},key()),merged=app.transform({sessionId:session.id,process:'MERGE',containerId:mergeContainer.id,inputs:[{batchId:a.batch.id,consumeWeightKg:2},{batchId:b.batch.id,consumeWeightKg:3}],outputWeightKg:4},key());
   assert.deepEqual(entry(app,'BATCH',merged.id,'BATCH_TRANSFORMED').map(x=>[x.beforeQty,x.afterQty,x.delta]),[[0,4,4]]);
   Object.assign(merged,{status:'DRIED',zone:'PACKAGING'});app.weighForPackaging({sessionId:session.id,batchId:merged.id,weightKg:4},key());
   const pkg=app.createPackage({sessionId:session.id,type:'POUCH',level:'UNIT',items:[{batchId:merged.id,weightKg:1}],targetWeightKg:1,tolerancePercent:0},key());
