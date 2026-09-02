@@ -76,6 +76,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&u.pathname==='/api/configurations'){needs('inventory:read');return send(200,{items:app.configurationVersionsView()});}
       if(req.method==='GET'&&u.pathname==='/api/overrides'){needs('inventory:read');return send(200,{items:app.state.overrides});}
       if(req.method==='GET'&&u.pathname==='/api/inventory'){needs('inventory:read');return send(200,{items:app.inventory()});}
+      if(req.method==='GET'&&/^\/api\/inventory\/[^/]+\/[^/]+\/ledger$/.test(u.pathname)){needs('inventory:read');const[, , ,entityType,entityId]=u.pathname.split('/');app.requireUuid(entityId,'entityId');return send(200,{items:app.inventoryLedger(entityType,entityId)});}
       if(req.method==='GET'&&u.pathname==='/api/print-jobs'){needs('inventory:read');return send(200,{items:app.state.printJobs});}
       if(req.method==='GET'&&u.pathname==='/api/outbox'){needs('audit:read');return send(200,{items:app.state.outbox});}
       if(req.method==='GET'&&u.pathname==='/api/sessions'){needs('inventory:read');return send(200,{items:app.state.sessions});}

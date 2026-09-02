@@ -3,6 +3,7 @@ export async function guardedHistoryCleanup(pool, siteId) {
   try {
     await client.query('BEGIN');
     await client.query("SET LOCAL app.archiving = 'on'");
+    await client.query('DELETE FROM inventory_ledger WHERE site_id=$1', [siteId]);
     await client.query('DELETE FROM outbox_events WHERE site_id=$1', [siteId]);
     await client.query('DELETE FROM event_history_archive WHERE site_id=$1', [siteId]);
     await client.query('DELETE FROM audit_events WHERE site_id=$1', [siteId]);
