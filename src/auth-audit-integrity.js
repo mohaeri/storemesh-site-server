@@ -1,13 +1,18 @@
 const credentialFingerprint=value=>value?String(value).slice(0,16):null;
 
-export async function applyAuditedAuthMutation({apply,compensate,record,persist,flush,logger=console.error}){
-  const mutation=await apply();
-  try{record(mutation);persist();await flush();return mutation}
-  catch(originalError){
-    try{await compensate(mutation)}
-    catch(compensationError){logger(JSON.stringify({level:'error',component:'auth-audit-compensation',message:'Compensating rollback failed',originalError:originalError.message,compensationError:compensationError.message,at:new Date().toISOString()}))}
-    throw originalError;
-  }
+export async function applyAuditedAuthMutation({pool,apply,record,writeAudit,restore}){
+  const client=pool?.connect?await pool.connect():null;
+  try{
+    if(client)await client.query('BEGIN');
+    const mutation=await apply(client),event=record(mutation);
+    await writeAudit(event,client);
+    if(client)await client.query('COMMIT');
+    return mutation;
+  }catch(error){
+    if(client)await client.query('ROLLBACK').catch(()=>{});
+    await restore?.();
+    throw error;
+  }finally{client?.release?.()}
 }
 
 export function reconcileAuthAudit({auth,app,logger=console.warn}={}){
