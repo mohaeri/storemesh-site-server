@@ -1,3 +1,4 @@
+import { createTestCycle } from '../test-support/station-machines.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -13,7 +14,7 @@ test('quarantined inventory is rejected by every production, packaging, and ship
   assert.equal(batch.status,'QUARANTINED');
   Object.assign(container,{zone:'COLD_ROOM_CLEAN',status:'IN_USE'});assert.throws(()=>app.sortBatch({sessionId:session.id,containerId:container.id,batchId:batch.id,outputs:[{grade:'A',size:'L',weightKg:9}]},'sort-q'),errorCode('BATCH_QUARANTINED'));
   Object.assign(container,{zone:'WASHING',status:'READY_FOR_WASHING'});assert.throws(()=>app.transform({sessionId:session.id,containerId:container.id,inputs:[{batchId:batch.id,consumeWeightKg:10}],process:'WASH',outputWeightKg:10},'wash-q'),errorCode('BATCH_QUARANTINED'));
-  Object.assign(container,{zone:'DRYING',status:'READY_FOR_DRYING'});assert.throws(()=>app.createCycle({sessionId:session.id,type:'DRY',machineId:'dryer',containerIds:[container.id]},'cycle-q'),errorCode('BATCH_QUARANTINED'));
+  Object.assign(container,{zone:'DRYING',status:'READY_FOR_DRYING'});assert.throws(()=>createTestCycle(app,{sessionId:session.id,type:'DRY',machineId:'dryer',containerIds:[container.id]},'cycle-q'),errorCode('BATCH_QUARANTINED'));
   assert.throws(()=>app.weighForPackaging({sessionId:session.id,batchId:batch.id,weightKg:10},'weigh-q'),errorCode('BATCH_QUARANTINED'));
   assert.throws(()=>app.createPackage({sessionId:session.id,type:'POUCH',level:'UNIT',items:[{batchId:batch.id,weightKg:1}],targetWeightKg:1},'package-q'),errorCode('BATCH_QUARANTINED'));
   const customer=app.createCustomer({code:'C',name:'Customer'},'customer'),order=app.createSalesOrder({customerId:customer.id,items:[{packageType:'CARTON',quantity:1}]},'order'),carton={id:crypto.randomUUID(),code:'P-Q',type:'CARTON',level:'CARTON',status:'READY_TO_SHIP',items:[{batchId:batch.id,weightKg:1}],childPackageIds:[],createdAt:new Date().toISOString()};app.state.packages.push(carton);

@@ -1,3 +1,4 @@
+import { createTestCycle } from '../test-support/station-machines.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { StoreMesh } from '../src/domain.js';
@@ -28,7 +29,7 @@ test('FIFO deviation, quarantine and equipment failure raise exceptions',()=>{
   const checklist=app.createQcChecklist({code:'QC-T',product:oldest.product,stage:'RECEIVING',name:'QC',items:[{code:'VISUAL',prompt:'Visual pass'}]},'checklist');
   app.qualityCheck({sessionId:app.state.sessions.find(x=>x.status==='ACTIVE')?.id,batchId:oldest.id,stage:'RECEIVING',checklistId:checklist.id,responses:[{itemCode:'VISUAL',value:false}],attestation:{confirmed:true,role:'QUALITY_OPERATOR'},actorRoles:['QUALITY_OPERATOR'],result:'QUARANTINED',inspectorId:'qc'},'qc');
   newer.status='SLICED';newer.zone='FREEZING';tray.status='SLICED';tray.zone='FREEZING';tray.activeSessionId=null;
-  const cycle=app.createCycle({sessionId:session.id,type:'FREEZE',machineId:'freezer-1',trayIds:[tray.id]},'cycle');
+  const cycle=createTestCycle(app,{sessionId:session.id,type:'FREEZE',machineId:'freezer-1',trayIds:[tray.id]},'cycle');
   app.transitionCycle(cycle.id,'START',{sessionId:session.id},'start');app.transitionCycle(cycle.id,'FAIL',{sessionId:session.id,reason:'power'},'fail');
   const types=new Set(app.state.exceptions.map(x=>x.type));
   for(const required of ['FIFO_DEVIATION','QUALITY_QUARANTINE','EQUIPMENT_CYCLE_FAILURE'])assert.equal(types.has(required),true);

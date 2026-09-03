@@ -1,3 +1,4 @@
+import { createTestCycle } from '../test-support/station-machines.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -14,7 +15,7 @@ test('latest REJECTED QC blocks sorting, transforms, cycles, weighing, packaging
     const{app,session,container,batch}=rejected();
     if(operation==='sort'){Object.assign(container,{zone:'COLD_ROOM_CLEAN',status:'IN_USE',activeSessionId:null});rejectedCode(()=>app.sortBatch({sessionId:session.id,containerId:container.id,batchId:batch.id,outputs:[{grade:'A',size:'L',weightKg:9}]},'sort'))}
     if(operation==='transform')rejectedCode(()=>app.transform({sessionId:session.id,process:'MERGE',inputs:[{batchId:batch.id,consumeWeightKg:1}],outputWeightKg:1},'transform'));
-    if(operation==='cycle'){Object.assign(batch,{status:'SORTED',zone:'DRYING'});Object.assign(container,{zone:'DRYING',status:'READY_FOR_DRYING',activeSessionId:null});rejectedCode(()=>app.createCycle({sessionId:session.id,type:'DRY',machineId:'DRYER-1',containerIds:[container.id]},'cycle'))}
+    if(operation==='cycle'){Object.assign(batch,{status:'SORTED',zone:'DRYING'});Object.assign(container,{zone:'DRYING',status:'READY_FOR_DRYING',activeSessionId:null});rejectedCode(()=>createTestCycle(app,{sessionId:session.id,type:'DRY',machineId:'DRYER-1',containerIds:[container.id]},'cycle'))}
     if(operation==='weigh'){session.selectedRole='PACKAGING_OPERATOR';batch.status='DRIED';rejectedCode(()=>app.weighForPackaging({sessionId:session.id,batchId:batch.id,weightKg:10},'weigh'))}
     if(operation==='package'){session.selectedRole='PACKAGING_OPERATOR';batch.status='READY_FOR_PACKAGING';rejectedCode(()=>app.createPackage({sessionId:session.id,type:'POUCH',level:'UNIT',items:[{batchId:batch.id,weightKg:1}],targetWeightKg:1},'package'))}
     if(operation==='shipment'){const pkg={id:randomUUID(),code:'P-REJECTED',type:'CARTON',level:'CARTON',status:'READY_TO_SHIP',items:[{batchId:batch.id,weightKg:1}],childPackageIds:[],createdAt:new Date().toISOString()},customer=app.createCustomer({code:'QC-C',name:'QC Customer'},'customer'),order=app.createSalesOrder({customerId:customer.id,items:[{packageType:'CARTON',quantity:1}]},'order');app.state.packages.push(pkg);rejectedCode(()=>app.createShipment({salesOrderId:order.id,packageIds:[pkg.id]},'shipment'))}
