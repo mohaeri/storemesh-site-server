@@ -10,7 +10,7 @@ function fixture(app=new StoreMesh()){
   app.requestContainerLabel(container.id,randomUUID());
   const job=app.state.printJobs.find(x=>x.entityId===container.id);
   app.claimPrint(job.id,session.id);
-  app.failPrint(job.id,'paper jam',session.id);
+  app.failPrint(job.id,'PAPER_FINISHED',session.id);
   return {app,session,container,job};
 }
 
@@ -26,9 +26,9 @@ test('active PRINTING threshold raises one excessive-reprint exception per label
   const {app,session,job}=fixture();
   app.state.configurationVersions.push({id:randomUUID(),scope:'PRINTING',status:'ACTIVE',values:{reprintThreshold:1}});
   let retry=app.retryPrint(job.id,job.label,session.id,'retry one');
-  app.failPrint(retry.id,'still broken',session.id);
+  app.failPrint(retry.id,'PRINTER_ERROR',session.id);
   retry=app.retryPrint(retry.id,retry.label,session.id,'retry two');
-  app.failPrint(retry.id,'still broken',session.id);
+  app.failPrint(retry.id,'PRINTER_ERROR',session.id);
   app.retryPrint(retry.id,retry.label,session.id,'retry three');
   assert.equal(app.state.exceptions.filter(x=>x.type==='EXCESSIVE_REPRINT_COUNT').length,1);
 });
