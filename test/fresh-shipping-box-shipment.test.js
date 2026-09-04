@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { StoreMesh } from '../src/domain.js';
+import { ConfiguredStoreMesh as StoreMesh } from '../test-support/configurations.js';
 import { PostgresRepository } from '../src/postgres-repository.js';
 
 let sequence=0;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { StoreMesh } from '../src/domain.js';
+import { ConfiguredStoreMesh as StoreMesh } from '../test-support/configurations.js';
 
 let sequence=0;const key=label=>`${label}-${++sequence}`;
 const setup=()=>{const app=new StoreMesh({clock:()=> '2026-08-24T09:00:00.000Z'}),session=app.openSession('operator','TEST-DEVICE','RECEIVING','STORAGE_OPERATOR');return{app,session}};

@@ -10,7 +10,8 @@ export function activateTestConfiguration(app,scope,values){
 }
 
 export const configureUnitPackaging=(app,values={})=>activateTestConfiguration(app,'PACKAGING',{targetWeightKg:1,weightTolerancePercent:9999,allowMixedProducts:true,allowMixedGrades:true,...values});
+export const configureFreshExport=(app,values={})=>activateTestConfiguration(app,'FRESH_EXPORT',{allowedNetWeightsKg:[.25,.5,1,2,5,7],...values});
 
 export class ConfiguredStoreMesh extends StoreMeshBase{
-  constructor(options){super(options);configureUnitPackaging(this)}
+  constructor(options){super(options);configureUnitPackaging(this);configureFreshExport(this)}
 }
