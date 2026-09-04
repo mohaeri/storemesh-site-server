@@ -2,7 +2,7 @@ import { createTestCycle } from '../test-support/station-machines.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PostgresRepository } from '../src/postgres-repository.js';
-import { StoreMesh } from '../src/domain.js';
+import { ConfiguredStoreMesh as StoreMesh } from '../test-support/configurations.js';
 
 const pgOnly={skip:!process.env.DATABASE_URL},key=()=>crypto.randomUUID();
 

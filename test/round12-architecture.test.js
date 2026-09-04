@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { StoreMesh } from '../src/domain.js';
+import { ConfiguredStoreMesh as StoreMesh } from '../test-support/configurations.js';
 import { AuthService } from '../src/auth.js';
 import { createServer } from '../src/server.js';
 
