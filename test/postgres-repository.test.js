@@ -10,9 +10,9 @@ test('postgres repository stores idempotency metadata and advances an atomic sit
 });
 
 test('postgres repository hydrates normalized rows and idempotency maps',async()=>{
-  const siteId='d804be5e-1c77-4a9c-a456-b98a51497bea';const query=async sql=>{if(/SELECT id FROM sites/.test(sql))return{rows:[{id:siteId}]};if(/FROM idempotency_records/.test(sql))return{rows:[{idempotency_key:'x',response:{id:'1'},request_hash:'abc',created_at:'2026-08-18T00:00:00Z',expires_at:'2026-08-25T00:00:00Z'}]};if(/SELECT version FROM site_state_versions/.test(sql))return{rows:[{version:4}]};return{rows:[]}};
+  const siteId='d804be5e-1c77-4a9c-a456-b98a51497bea',queries=[];const query=async sql=>{queries.push(sql);if(/SELECT id FROM sites/.test(sql))return{rows:[{id:siteId}]};if(/FROM idempotency_records/.test(sql))return{rows:[{idempotency_key:'x',response:{id:'1'},request_hash:'abc',created_at:'2026-08-18T00:00:00Z',expires_at:'2026-08-25T00:00:00Z'}]};if(/SELECT version FROM site_state_versions/.test(sql))return{rows:[{version:4}]};return{rows:[]}};
   const repo=Object.create(PostgresRepository.prototype);Object.assign(repo,{siteCode:'IRAN',siteId,version:0,hashes:new Map(),pool:{query}});
-  const state=await repo.load();assert.equal(state.idempotency.get('x').id,'1');assert.equal(state.idempotencyMeta.get('x').requestHash,'abc');assert.equal(repo.version,4);
+  const state=await repo.load();assert.equal(state.idempotency.get('x').id,'1');assert.equal(state.idempotencyMeta.get('x').requestHash,'abc');assert.equal(repo.version,4);assert.ok(queries.some(sql=>sql.includes('FROM audit_events')&&sql.includes('ORDER BY occurred_at,sequence,id')));assert.ok(queries.some(sql=>sql.includes('FROM outbox_events')&&sql.includes("ORDER BY occurred_at,(payload->>'sequence')::bigint,id")));
 });
 
 test('high-growth collections persist only deltas instead of rewriting history',async()=>{
