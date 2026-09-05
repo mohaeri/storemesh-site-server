@@ -81,6 +81,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
       if(req.method==='GET'&&/^\/api\/inventory\/[^/]+\/[^/]+\/ledger$/.test(u.pathname)){needs('inventory:read');const[, , ,entityType,entityId]=u.pathname.split('/');app.requireUuid(entityId,'entityId');return send(200,{items:app.inventoryLedger(entityType,entityId)});}
       if(req.method==='GET'&&u.pathname==='/api/print-jobs'){needs('inventory:read');return send(200,{items:app.state.printJobs});}
       if(req.method==='GET'&&u.pathname==='/api/outbox'){needs('audit:read');return send(200,{items:app.state.outbox});}
+      if(req.method==='POST'&&/^\/api\/outbox\/[^/]+\/requeue$/.test(u.pathname)){needs('audit:read');result=app.requeueOutbox(u.pathname.split('/')[3]);await app.flush();return send(200,{success:true,data:result});}
       if(req.method==='GET'&&u.pathname==='/api/sessions'){needs('inventory:read');return send(200,{items:app.state.sessions});}
       if(req.method==='GET'&&u.pathname==='/api/packages'){needs('inventory:read');return send(200,{items:app.state.packages});}
       if(req.method==='GET'&&u.pathname==='/api/cycles'){needs('inventory:read');return send(200,{items:app.state.cycles});}
