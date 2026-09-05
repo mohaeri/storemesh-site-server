@@ -212,7 +212,7 @@ export function createServer({ app = new StoreMesh({ site: process.env.SITE_CODE
     } catch(e){stats.errors++;app.record(e.code==='FORBIDDEN'?'PERMISSION_DENIED':'REQUEST_FAILED',null,e.code==='FORBIDDEN'?(e.details??{}):{method:req.method,path:req.url,errorCode:e.code??'SYSTEM'},null,auditContext.deviceId,'FAILURE');app.persist();const failure=errorResponse(e);if(failure.status>=500)console.error(JSON.stringify({level:'error',site:app.site,errorCode:e.code??'SYSTEM',message:e.message,at:new Date().toISOString()}));send(failure.status,failure.body);}
     });
   });
-  const idleSweep=setInterval(()=>app.sweepIdleSessions(),1000);idleSweep.unref();server.on('close',()=>clearInterval(idleSweep));server.stats=stats;return server;
+  const idleSweep=setInterval(()=>{app.sweepIdleSessions();app.sweepInternalTransferReceipts()},1000);idleSweep.unref();server.on('close',()=>clearInterval(idleSweep));server.stats=stats;return server;
 }
 
 export async function createRuntimeServer() {
