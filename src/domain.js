@@ -1,6 +1,20 @@
 import { randomUUID, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 const PROCESS_RULES={SORT:{status:'SORTED',zone:'SORTING'},WASH:{status:'WASHED',zone:'WASHING'},SLICE:{status:'SLICED',zone:'SLICING'},FREEZE:{status:'FROZEN',zone:'FREEZING'},FREEZE_DRY:{status:'FREEZE_DRIED',zone:'FREEZE_DRYING'},DRY:{status:'DRIED',zone:'DRYING'},MERGE:{status:'SORTED',zone:'SORTING'}};
+export const AUDIT_CATEGORIES=['Authentication','Inventory','Production','Packaging','Shipping','Labeling','Exceptions','Configuration','Administration','Security'];
+const AUDIT_CATEGORY_RULES=[
+  ['Security',/PERMISSION|RATE_LIMIT|PAYLOAD_TOO_LARGE|SECURITY/],
+  ['Authentication',/LOGIN|AUTH_SESSION|SESSION_/],
+  ['Labeling',/LABEL|PRINT/],
+  ['Exceptions',/EXCEPTION|QUARANTINE|QUALITY|(?:^|_)QC(?:_|$)|REQUEST_VALIDATION_FAILED|RESOURCE_NOT_FOUND|SYSTEM_FAILURE/],
+  ['Configuration',/CONFIGURATION|OVERRIDE/],
+  ['Shipping',/SHIPMENT|TRANSFER|DELIVERY_ACKNOWLEDGMENT/],
+  ['Packaging',/PACKAGE|PACKAGING|CARTON|FRESH_NET|SHIPPING_BOX/],
+  ['Production',/CYCLE|SORT|WASH|SLICE|FREEZ|DRY|YIELD|HARVEST|MACHINE|MEASUREMENT/],
+  ['Inventory',/INVENTORY|BATCH|CONTAINER|DELIVERY|RECEIV|MOVEMENT|CONSUMABLE|STORAGE|FIFO|TRACE/],
+  ['Administration',/.*/]
+];
+export const auditCategoryFor=type=>AUDIT_CATEGORY_RULES.find(([,pattern])=>pattern.test(String(type)))?.[0];
 const CONTAINER_GATES={
   RECEIVE:{field:'containerId',types:['BASKET','CRATE','SINGLE_USE'],zone:'RECEIVING',statuses:['AVAILABLE'],empty:true},
   SORT:{field:'containerId',types:['BASKET','CRATE','SINGLE_USE'],zones:['COLD_ROOM_CLEAN','COLD_ROOM_DIRTY'],statuses:['IN_USE'],batchStatuses:['RECEIVED']},
@@ -153,7 +167,7 @@ export class StoreMesh {
     const context=this.auditContext.getStore()??{},session=sessionId?this.state.sessions.find(x=>x.id===sessionId):null,deviceId=explicitDeviceId??session?.deviceId??context.deviceId??'SYSTEM';
     const beforeState=payload.beforeState??null,afterState=payload.afterState??null,eventPayload={...payload};delete eventPayload.beforeState;delete eventPayload.afterState;
     const requestId=context.requestId??randomUUID(),id=randomUUID();
-    const resolved=typeof entity==='object'&&entity!==null?entity:{entityId:entity??null,entityType:this.entityTypeForId(entity)};const event = { id, site: this.site, sequence:++this.state.eventSequence, type, entityId:resolved.entityId??null, entityType:resolved.entityType??null, sessionId:session?.id??sessionId, deviceId, userId:context.userId??session?.operatorId??null,requestId,ipAddress:context.ipAddress??null,result,payload:eventPayload,beforeState,afterState,actorRoles:[...(context.roles??[])],actorStation:context.station??session?.station??null,occurredAt: this.clock(), schemaVersion:2 };
+    const resolved=typeof entity==='object'&&entity!==null?entity:{entityId:entity??null,entityType:this.entityTypeForId(entity)};const event = { id, site: this.site, sequence:++this.state.eventSequence, type, category:auditCategoryFor(type), entityId:resolved.entityId??null, entityType:resolved.entityType??null, sessionId:session?.id??sessionId, deviceId, userId:context.userId??session?.operatorId??null,requestId,ipAddress:context.ipAddress??null,result,payload:eventPayload,beforeState,afterState,actorRoles:[...(context.roles??[])],actorStation:context.station??session?.station??null,occurredAt: this.clock(), schemaVersion:2 };
     this.state.audit.push(event); this.state.outbox.push({ ...event, status: 'PENDING' }); return event;
   }
   openSession(operatorId, deviceId, station = 'terminal-01',selectedRole=null) {

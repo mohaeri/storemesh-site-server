@@ -33,7 +33,7 @@ const exerciseAuditIp = async trustProxy => {
       body: JSON.stringify({ sessionId: 'missing' })
     });
     assert.equal(response.status, 404);
-    return app.state.audit.find(event => event.type === 'REQUEST_FAILED' && event.requestId === requestId)?.ipAddress;
+    return app.state.audit.find(event => event.type === 'RESOURCE_NOT_FOUND' && event.requestId === requestId)?.ipAddress;
   } finally {
     server.close();
     await once(server, 'close');

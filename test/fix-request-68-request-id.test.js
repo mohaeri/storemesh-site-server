@@ -37,18 +37,18 @@ test('HTTP audit replaces oversized and blank request IDs while preserving a nor
     const generatedOversizedId = oversizedResponse.headers.get('x-request-id');
     assert.match(generatedOversizedId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     assert.notEqual(generatedOversizedId, oversized);
-    assert.ok(app.state.audit.some(event => event.type === 'REQUEST_FAILED' && event.requestId === generatedOversizedId));
+    assert.ok(app.state.audit.some(event => event.type === 'RESOURCE_NOT_FOUND' && event.requestId === generatedOversizedId));
 
     const blankResponse = await sendFailure('   ');
     assert.equal(blankResponse.status, 404);
     const generatedBlankId = blankResponse.headers.get('x-request-id');
     assert.match(generatedBlankId, /^[0-9a-f-]{36}$/i);
-    assert.ok(app.state.audit.some(event => event.type === 'REQUEST_FAILED' && event.requestId === generatedBlankId));
+    assert.ok(app.state.audit.some(event => event.type === 'RESOURCE_NOT_FOUND' && event.requestId === generatedBlankId));
 
     const normalResponse = await sendFailure('request-68-normal');
     assert.equal(normalResponse.status, 404);
     assert.equal(normalResponse.headers.get('x-request-id'), 'request-68-normal');
-    assert.ok(app.state.audit.some(event => event.type === 'REQUEST_FAILED' && event.requestId === 'request-68-normal'));
+    assert.ok(app.state.audit.some(event => event.type === 'RESOURCE_NOT_FOUND' && event.requestId === 'request-68-normal'));
   } finally {
     server.close();
     await once(server, 'close');
