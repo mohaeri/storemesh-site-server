@@ -1,0 +1,44 @@
+name: Soak smoke
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 2 * * *'
+
+jobs:
+  postgres-business-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: storemesh
+          POSTGRES_USER: storemesh
+          POSTGRES_PASSWORD: storemesh-soak
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U storemesh -d storemesh"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://storemesh:storemesh-soak@localhost:5432/storemesh
+      SOAK_ITERATIONS: '2'
+      SOAK_DURATION_MINUTES: '10'
+      SOAK_INTERVAL_SECONDS: '1'
+      SOAK_LOG_PATH: artifacts/soak-results.jsonl
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with: { version: 11.19.0 }
+      - uses: actions/setup-node@v6
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm migrate
+      - run: pnpm soak
+      - if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: soak-results
+          path: artifacts/soak-results.jsonl
+          if-no-files-found: warn

@@ -1,0 +1,14 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
+import {StoreMesh} from '../src/domain.js';import {PostgresRepository} from '../src/postgres-repository.js';import {OutboxPublisher} from '../src/outbox-publisher.js';
+import { guardedHistoryCleanup } from '../support/postgres-cleanup.js';
+
+test('every event gets a strictly increasing per-site sequence',()=>{const app=new StoreMesh({clock:()=> '2026-08-28T02:00:00.000Z'});app.createTask({title:'one',zone:'QC'},'one');app.createTask({title:'two',zone:'QC'},'two');assert.deepEqual(app.state.audit.map(x=>x.sequence),[1,2]);assert.deepEqual(app.state.outbox.map(x=>x.sequence),[1,2]);assert.equal(app.state.audit[0].occurredAt,app.state.audit[1].occurredAt)});
+
+test('publisher orders identical-time events by site and sequence',async()=>{
+  const delivered=[],app=new StoreMesh(),at='2026-08-28T02:00:00.000Z';
+  app.state.outbox=[3,1,2].map(sequence=>({id:randomUUID(),site:'IRAN',sequence,type:`E${sequence}`,entityId:null,payload:{},schemaVersion:2,occurredAt:at,status:'PENDING'}));
+  const publisher=new OutboxPublisher({app,cloudUrl:'http://cloud',siteKey:'key',fetchImpl:async(_url,options)=>{const items=JSON.parse(options.body).items;delivered.push(...items.map(x=>x.sequence));return{ok:true,json:async()=>({accepted:items.length,acceptedIds:items.map(x=>x.id),duplicateIds:[],rejected:[]})}}});
+  await publisher.flushOnce();assert.deepEqual(delivered,[1,2,3]);
+});
+
+test('event sequence survives PostgreSQL reload and resumes above persisted maximum',{skip:!process.env.DATABASE_URL},async()=>{const site=`EVENT-SEQ-${Date.now()}`,repository=new PostgresRepository({connectionString:process.env.DATABASE_URL,siteCode:site}),clock=()=> '2026-08-28T02:00:00.000Z';try{let app=new StoreMesh({site,clock,initialState:await repository.load()});app.repository=repository;app.createTask({title:'one',zone:'QC'},'one');app.createTask({title:'two',zone:'QC'},'two');await app.flush();app=new StoreMesh({site,clock,initialState:await repository.load()});app.repository=repository;assert.deepEqual(app.state.audit.map(x=>x.sequence),[1,2]);const third=app.createTask({title:'three',zone:'QC'},'three');await app.flush();assert.equal(app.state.audit.find(x=>x.entityId===third.id).sequence,3);assert.equal((await repository.load()).audit.at(-1).sequence,3)}finally{await guardedHistoryCleanup(repository.pool,repository.siteId);for(const table of['outbox_events','audit_events','idempotency_records','tasks','devices','products','suppliers','grades','sizes','zones','package_types','site_state_versions'])await repository.pool.query(`DELETE FROM ${table} WHERE site_id=$1`,[repository.siteId]);await repository.pool.query('DELETE FROM sites WHERE id=$1',[repository.siteId]);await repository.close()}});

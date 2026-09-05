@@ -1,0 +1,10 @@
+ALTER TABLE inventory_adjustments ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'APPROVED';
+ALTER TABLE inventory_adjustments ADD COLUMN IF NOT EXISTS requested_by text;
+ALTER TABLE inventory_adjustments ADD COLUMN IF NOT EXISTS approved_by text;
+ALTER TABLE inventory_adjustments ADD COLUMN IF NOT EXISTS rejected_by text;
+ALTER TABLE inventory_adjustments ADD COLUMN IF NOT EXISTS approved_at timestamptz;
+ALTER TABLE inventory_adjustments ADD COLUMN IF NOT EXISTS rejected_at timestamptz;
+ALTER TABLE inventory_adjustments ADD COLUMN IF NOT EXISTS rejection_reason text;
+UPDATE inventory_adjustments SET requested_by=COALESCE(requested_by,user_id),approved_at=COALESCE(approved_at,created_at),status='APPROVED';
+ALTER TABLE inventory_adjustments DROP CONSTRAINT IF EXISTS inventory_adjustments_status_check;
+ALTER TABLE inventory_adjustments ADD CONSTRAINT inventory_adjustments_status_check CHECK(status IN ('DRAFT','APPROVED','REJECTED'));
