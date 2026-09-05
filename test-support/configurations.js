@@ -14,4 +14,12 @@ export const configureFreshExport=(app,values={})=>activateTestConfiguration(app
 
 export class ConfiguredStoreMesh extends StoreMeshBase{
   constructor(options){super(options);configureUnitPackaging(this);configureFreshExport(this)}
+  createPackage(input,key){
+    if(input.level==='UNIT'&&!input.measurementId&&input.items?.length===1){
+      const item=input.items[0],id=randomUUID();
+      this.state.measurements.push({id,batchId:item.batchId,sessionId:input.sessionId,deviceId:'TEST-DEVICE',scaleId:null,scaleCode:null,weightKg:Number(item.weightKg),rawReadingKg:Number(item.weightKg),purpose:'PACKAGE_UNIT',reason:'PACKAGE_UNIT',measuredAt:new Date().toISOString(),consumedAt:null,consumedBy:null});
+      input={...input,measurementId:id};
+    }
+    return super.createPackage(input,key);
+  }
 }

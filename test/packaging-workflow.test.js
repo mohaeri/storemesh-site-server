@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { StoreMesh } from '../src/domain.js';
-import { configureUnitPackaging } from '../test-support/configurations.js';
+import { ConfiguredStoreMesh, configureUnitPackaging } from '../test-support/configurations.js';
 
 test('packaging requires its dedicated session, permanent checkpoint and tolerance',()=>{
-  const app=new StoreMesh();configureUnitPackaging(app,{weightTolerancePercent:2});
+  const app=new ConfiguredStoreMesh();configureUnitPackaging(app,{weightTolerancePercent:2});
   const generic=app.openSession('operator','TEST-DEVICE'),packaging=app.openSession('packer','PDA-PACK-01','PACKAGING','PACKAGING_OPERATOR'),container=app.createContainer({capacityKg:10},'container'),batch=app.receive({sessionId:generic.id,containerId:container.id,supplier:'S',product:'T',grade:'A',size:'L',weightKg:5},'receive');
   assert.throws(()=>app.weighForPackaging({sessionId:generic.id,batchId:batch.id,weightKg:5},'wrong-session'),e=>e.code==='PACKAGING_SESSION_REQUIRED');
   assert.throws(()=>app.createPackage({sessionId:packaging.id,type:'POUCH',level:'UNIT',items:[{batchId:batch.id,weightKg:1}]},'too-soon'),e=>e.code==='BATCH_NOT_READY_FOR_PACKAGING');
