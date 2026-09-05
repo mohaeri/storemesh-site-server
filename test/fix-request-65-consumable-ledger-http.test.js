@@ -25,6 +25,7 @@ test('consumable ledger HTTP routes enforce permission, scope and newest-first o
   app.receiveConsumable(second.id, { quantity: 7, source: 'other vendor', receivedAt: now }, randomUUID());
   now = '2026-08-30T10:00:00.000Z';
   app.receiveConsumable(first.id, { quantity: 3, source: 'new vendor', receivedAt: now }, randomUUID());
+  app.receiveConsumable(first.id, { quantity: 1, source: 'same-time vendor', receivedAt: now }, randomUUID());
   now = '2026-08-30T11:00:00.000Z';
   app.consumeConsumableDirect(first.code, 2, 'HTTP_TEST', randomUUID());
   app.persist();
@@ -53,13 +54,16 @@ test('consumable ledger HTTP routes enforce permission, scope and newest-first o
     const receiptsResponse = await get(`/api/consumables/${first.id}/receipts`, reader);
     assert.equal(receiptsResponse.status, 200);
     const receipts = (await receiptsResponse.json()).items;
-    assert.deepEqual(receipts.map(item => item.source), ['new vendor', 'old vendor']);
+    assert.deepEqual(receipts.slice(0,2).map(item=>item.id),receipts.slice(0,2).map(item=>item.id).sort().reverse());
+    assert.deepEqual(new Set(receipts.slice(0,2).map(item=>item.source)),new Set(['new vendor','same-time vendor']));
+    assert.equal(receipts.at(-1).source,'old vendor');
     assert.ok(receipts.every(item => item.consumableId === first.id));
 
     const transactionsResponse = await get(`/api/consumables/${first.id}/transactions`, reader);
     assert.equal(transactionsResponse.status, 200);
     const transactions = (await transactionsResponse.json()).items;
-    assert.deepEqual(transactions.map(item => item.type), ['CONSUMPTION', 'RECEIPT', 'RECEIPT']);
+    assert.deepEqual(transactions.map(item => item.type), ['CONSUMPTION', 'RECEIPT', 'RECEIPT', 'RECEIPT']);
+    assert.deepEqual(transactions.slice(1,3).map(item=>item.id),transactions.slice(1,3).map(item=>item.id).sort().reverse());
     assert.ok(transactions.every(item => item.consumableId === first.id));
 
     for (const suffix of ['receipts', 'transactions']) {
