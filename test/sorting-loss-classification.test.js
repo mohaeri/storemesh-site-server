@@ -6,7 +6,7 @@ import { PostgresRepository } from '../src/postgres-repository.js';
 
 const key=()=>randomUUID();
 const setup=(app=new StoreMesh(),product='T')=>{const session=app.openSession(randomUUID(),'TEST-DEVICE'),input=app.createContainer({capacityKg:20},key()),batch=app.receive({sessionId:session.id,containerId:input.id,supplier:'S',product,grade:'UNSORTED',size:'MIXED',weightKg:10},key()),output=app.createContainer({capacityKg:20},key());app.moveContainer(input.id,'COLD_ROOM_CLEAN',session.id,key());app.moveContainer(output.id,'SORTING',session.id,key());return{app,session,input,batch,output}};
-const sort=(fixture,weightKg,lossReason)=>fixture.app.sortBatch({sessionId:fixture.session.id,containerId:fixture.input.id,batchId:fixture.batch.id,outputs:[{grade:'A',size:'L',weightKg,containerId:fixture.output.id}],...(lossReason===undefined?{}:{lossReason})},key());
+const sort=(fixture,weightKg,lossReason)=>fixture.app.sortBatch({sessionId:fixture.session.id,containerId:fixture.input.id,batchId:fixture.batch.id,outputs:[{grade:'A',size:'L',weightKg,containerId:fixture.output.id,destination:'FRESH_EXPORT'}],...(lossReason===undefined?{}:{lossReason})},key());
 
 test('non-zero Sorting loss requires a supported reason while zero loss does not',()=>{let fixture=setup();assert.throws(()=>sort(fixture,9),error=>error.code==='SORT_LOSS_REASON_REQUIRED');fixture=setup();assert.throws(()=>sort(fixture,9,'SHRINKAGE'),error=>error.code==='SORT_LOSS_REASON_INVALID');fixture=setup();const result=sort(fixture,10);assert.equal(result.lossKg,0);assert.equal(result.lossReason,null)});
 

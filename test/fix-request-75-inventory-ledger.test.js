@@ -32,7 +32,7 @@ test('receiving, identity-preserving transforms, merge, packaging and consumable
 
 test('sorting, fresh-net creation, internal transfer receipt and inventory adjustment are ledgered',()=>{
   const app=new StoreMesh(),session=app.openSession('operator','TEST-DEVICE','SORTING','MANAGER'),source=received(app,session,10),out=app.createContainer({capacityKg:20},key());app.moveContainer(out.id,'SORTING',session.id,key());app.moveContainer(source.container.id,'COLD_ROOM_CLEAN',session.id,key());
-  const sorted=app.sortBatch({sessionId:session.id,containerId:source.container.id,batchId:source.batch.id,outputs:[{grade:'A',size:'L',weightKg:9,containerId:out.id}],lossKg:1,lossReason:'WASTE'},key()).children[0];
+  const sorted=app.sortBatch({sessionId:session.id,containerId:source.container.id,batchId:source.batch.id,outputs:[{grade:'A',size:'L',weightKg:9,containerId:out.id,destination:'FRESH_EXPORT'}],lossKg:1,lossReason:'WASTE'},key()).children[0];
   assert.deepEqual(entry(app,'BATCH',sorted.id,'BATCH_SORTED').map(x=>x.delta),[9]);
   Object.assign(sorted,{destination:'FRESH_EXPORT',zone:'FRESH_EXPORT'});Object.assign(out,{zone:'FRESH_EXPORT',status:'SORTED'});session.selectedRole='MANAGER';
   const lot=app.createFreshNetLot({sessionId:session.id,batchId:sorted.id,containerId:out.id,unitWeightKg:1,count:2},key());
