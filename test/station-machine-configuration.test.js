@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { StoreMesh } from '../src/domain.js';
+
+let sequence=0;const key=label=>`${label}-${++sequence}`;
+function cycleFixture(){const app=new StoreMesh(),session=app.openSession('freezer','DEVICE-CYCLE-01','FREEZING','FREEZING_OPERATOR'),receiving=app.createContainer({capacityKg:20},key('receiving')),batch=app.receive({sessionId:session.id,containerId:receiving.id,supplier:'S',product:'T',grade:'A',size:'L',weightKg:5},key('receive')),tray=app.createContainer({type:'TRAY',stage:'POST_SORT',capacityKg:20},key('tray'));app.assignBatchToContainer(tray.id,batch.id,session.id,key('assign'));Object.assign(batch,{status:'SLICED',zone:'FREEZING'});Object.assign(tray,{status:'SLICED',zone:'FREEZING',activeSessionId:null});return{app,session,tray}}
+function activateMachines(app,values){const version=app.createConfiguration({scope:'STATION_MACHINES',values,userId:'author'},key('config'));app.transitionConfiguration(version.id,'APPROVE','approver',key('approve'));app.transitionConfiguration(version.id,'ACTIVATE','approver',key('activate'));return version}
+
+test('active station-machine configuration governs cycle creation by station and type',()=>{const{app,session,tray}=cycleFixture();activateMachines(app,{stations:{FREEZING:{FREEZE:['FREEZER-01','FREEZER-02']}}});assert.throws(()=>app.createCycle({type:'FREEZE',machineId:'FORGED',sessionId:session.id,trayIds:[tray.id]},key('invalid')),e=>e.code==='MACHINE_NOT_CONFIGURED'&&e.status===409);const cycle=app.createCycle({type:'FREEZE',machineId:'FREEZER-02',sessionId:session.id,trayIds:[tray.id]},key('valid'));assert.equal(cycle.machineId,'FREEZER-02')});
+test('cycle fails closed when no station-machine config is active',()=>{const{app,session,tray}=cycleFixture();assert.throws(()=>app.createCycle({type:'FREEZE',machineId:' ',sessionId:session.id,trayIds:[tray.id]},key('blank')),e=>e.code==='MACHINE_ID_REQUIRED');assert.throws(()=>app.createCycle({type:'FREEZE',machineId:'LEGACY-LOCAL',sessionId:session.id,trayIds:[tray.id]},key('unconfigured')),e=>e.code==='STATION_MACHINES_NOT_CONFIGURED'&&e.status===409)});

@@ -1,0 +1,14 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { ConfiguredStoreMesh, configureUnitPackaging } from '../test-support/configurations.js';
+
+test('packaging requires its dedicated session, permanent checkpoint and tolerance',()=>{
+  const app=new ConfiguredStoreMesh();configureUnitPackaging(app,{weightTolerancePercent:2});
+  const generic=app.openSession('operator','TEST-DEVICE'),packaging=app.openSession('packer','PDA-PACK-01','PACKAGING','PACKAGING_OPERATOR'),container=app.createContainer({capacityKg:10},'container'),batch=app.receive({sessionId:generic.id,containerId:container.id,supplier:'S',product:'T',grade:'A',size:'L',weightKg:5},'receive');
+  assert.throws(()=>app.weighForPackaging({sessionId:generic.id,batchId:batch.id,weightKg:5},'wrong-session'),e=>e.code==='PACKAGING_SESSION_REQUIRED');
+  assert.throws(()=>app.createPackage({sessionId:packaging.id,type:'POUCH',level:'UNIT',items:[{batchId:batch.id,weightKg:1}]},'too-soon'),e=>e.code==='BATCH_NOT_READY_FOR_PACKAGING');
+  batch.status='DRIED';const measured=app.weighForPackaging({sessionId:packaging.id,batchId:batch.id,weightKg:5},'checkpoint');
+  assert.equal(measured.batch.status,'READY_FOR_PACKAGING');const measurement=app.state.measurements.find(x=>x.id===measured.measurement.id);assert.equal(measurement.reason,'PACKAGING_CHECKPOINT');assert.equal(measurement.deviceId,'PDA-PACK-01');
+  assert.throws(()=>app.createPackage({sessionId:packaging.id,type:'POUCH',level:'UNIT',items:[{batchId:batch.id,weightKg:1.1}],targetWeightKg:1,tolerancePercent:999},'outside'),e=>e.code==='PACKAGE_WEIGHT_OUT_OF_TOLERANCE');
+  const unit=app.createPackage({sessionId:packaging.id,type:'POUCH',level:'UNIT',items:[{batchId:batch.id,weightKg:1.01}],targetWeightKg:99,tolerancePercent:999},'inside');assert.equal(unit.level,'UNIT');assert.equal(unit.measuredWeightKg,1.01);assert.equal(unit.targetWeightKg,1);assert.equal(unit.tolerancePercent,2);
+});

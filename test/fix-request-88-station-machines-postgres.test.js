@@ -1,0 +1,7 @@
+import test from'node:test';
+import assert from'node:assert/strict';
+import{randomUUID}from'node:crypto';
+import{StoreMesh}from'../src/domain.js';
+import{PostgresRepository}from'../src/postgres-repository.js';
+
+test('unconfigured PostgreSQL site rejects cycle creation',{skip:!process.env.DATABASE_URL},async()=>{const site=`FR88-${Date.now()}`,repository=new PostgresRepository({connectionString:process.env.DATABASE_URL,siteCode:site});try{const app=new StoreMesh({site,initialState:await repository.load(),seedDemoReferences:true});app.repository=repository;const session=app.openSession('freezer','TEST-DEVICE','FREEZING','FREEZING_OPERATOR'),receiving=app.createContainer({capacityKg:20},randomUUID()),batch=app.receive({sessionId:session.id,containerId:receiving.id,supplier:'S',product:'T',grade:'A',size:'L',weightKg:5},randomUUID()),tray=app.createContainer({type:'TRAY',capacityKg:20},randomUUID());app.assignBatchToContainer(tray.id,batch.id,session.id,randomUUID());Object.assign(batch,{status:'SLICED',zone:'FREEZING'});Object.assign(tray,{status:'SLICED',zone:'FREEZING',activeSessionId:null});await app.flush();assert.throws(()=>app.createCycle({type:'FREEZE',machineId:'FORGED',sessionId:session.id,trayIds:[tray.id]},randomUUID()),error=>error.code==='STATION_MACHINES_NOT_CONFIGURED');await app.flush();assert.equal((await repository.load()).cycles.length,0)}finally{await repository.close()}});

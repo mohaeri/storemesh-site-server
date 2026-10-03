@@ -1,0 +1,10 @@
+ALTER TABLE measurements ALTER COLUMN batch_id DROP NOT NULL;
+ALTER TABLE measurements ADD COLUMN IF NOT EXISTS site_id uuid REFERENCES sites(id);
+UPDATE measurements m SET site_id=b.site_id FROM batches b WHERE m.batch_id=b.id AND m.site_id IS NULL;
+ALTER TABLE measurements ALTER COLUMN site_id SET NOT NULL;
+ALTER TABLE measurements ADD COLUMN IF NOT EXISTS scale_id uuid REFERENCES devices(id);
+ALTER TABLE measurements ADD COLUMN IF NOT EXISTS raw_reading_kg numeric(14,3);
+ALTER TABLE measurements ADD COLUMN IF NOT EXISTS purpose text;
+ALTER TABLE measurements ADD COLUMN IF NOT EXISTS consumed_at timestamptz;
+ALTER TABLE measurements ADD COLUMN IF NOT EXISTS consumed_by text;
+CREATE INDEX IF NOT EXISTS measurements_site_time_idx ON measurements(site_id,measured_at DESC);
